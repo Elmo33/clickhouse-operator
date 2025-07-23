@@ -18,7 +18,7 @@ spec:
       spec:
         containers:
         - name: clickhouse-pod
-          image: clickhouse/clickhouse-server:24.8
+          image: clickhouse/clickhouse-server:25.3.6
   configuration:
     clusters:
     - name: default
@@ -27,7 +27,7 @@ spec:
          - templates:
              podTemplate: v24.3
          - templates:
-             podTemplate: v24.8
+             podTemplate: v25.3.6
     files:
       users.d/remove_database_ordinary.xml: |
         <yandex>

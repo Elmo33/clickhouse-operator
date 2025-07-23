@@ -157,7 +157,7 @@ def test_006(self):
     create_shell_namespace_clickhouse_template()
 
     old_version = "clickhouse/clickhouse-server:24.8"
-    new_version = "clickhouse/clickhouse-server:25.3"
+    new_version = "clickhouse/clickhouse-server:25.3.6"
     chi = "test-006"
 
     with Then(f"Start CHI with version {old_version}"):

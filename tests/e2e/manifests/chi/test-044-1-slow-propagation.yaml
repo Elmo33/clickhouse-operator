@@ -26,12 +26,12 @@ spec:
         spec:
           containers:
             - name: clickhouse-pod
-              image: clickhouse/clickhouse-server:24.8
+              image: clickhouse/clickhouse-server:25.3.6
       - name: slow-replica
         spec:
           containers:
             - name: clickhouse-pod
-              image: clickhouse/clickhouse-server:24.8
+              image: clickhouse/clickhouse-server:25.3.6
               command:
                 - "/bin/bash"
                 - "-c"
