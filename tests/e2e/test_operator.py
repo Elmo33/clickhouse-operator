@@ -5659,7 +5659,7 @@ def test(self):
     cleanup_chis(self)
 
     # Placeholder for selective test running
-    run_tests = [ test_017, test_054]
+    run_tests = [test_008_3]
     for t in run_tests:
         if callable(t):
             Scenario(test=t)()
