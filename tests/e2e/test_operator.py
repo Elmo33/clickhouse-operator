@@ -5659,21 +5659,21 @@ def test(self):
     cleanup_chis(self)
 
     # Placeholder for selective test running
-    run_tests = [test_001, test_002]
-    for t in run_tests:
-        if callable(t):
-            Scenario(test=t)()
-        else:
-            Scenario(test=t[0], args=t[1])()
-    #
+    # run_tests = [test_008, test_009]
+    # for t in run_tests:
+    #     if callable(t):
+    #         Scenario(test=t)()
+    #     else:
+    #         Scenario(test=t[0], args=t[1])()
+
     # define values for Operator upgrade test (test_009)
 
-    # with Pool(3) as pool:
-    #     for scenario in loads(current_module(), Scenario, Suite):
-    #         if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
-    #             Scenario(run=scenario, parallel=True, executor=pool)
-    #     join()
-    #
-    # for scenario in loads(current_module(), Scenario, Suite):
-    #     if hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags):
-    #         Scenario(run=scenario)
+    with Pool(3) as pool:
+        for scenario in loads(current_module(), Scenario, Suite):
+            if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
+                Scenario(run=scenario, parallel=True, executor=pool)
+        join()
+
+    for scenario in loads(current_module(), Scenario, Suite):
+        if hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags):
+            Scenario(run=scenario)
