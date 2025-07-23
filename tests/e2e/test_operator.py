@@ -5260,7 +5260,7 @@ def test_054(self):
     chi = yaml_manifest.get_name(util.get_full_path("manifests/chi/test-006-ch-upgrade-1.yaml"))
 
     old_version = "clickhouse/clickhouse-server:24.8"
-    new_version = "clickhouse/clickhouse-server:25.3"
+    new_version = "clickhouse/clickhouse-server:25.3.6"
     with Then(f"Start CHI with version {old_version}"):
         kubectl.create_and_check(
             manifest="manifests/chi/test-006-ch-upgrade-1.yaml",
@@ -5659,21 +5659,21 @@ def test(self):
     cleanup_chis(self)
 
     # Placeholder for selective test running
-    # run_tests = [test_008, test_009]
-    # for t in run_tests:
-    #     if callable(t):
-    #         Scenario(test=t)()
-    #     else:
-    #         Scenario(test=t[0], args=t[1])()
-
+    run_tests = [test_008_3, test_017, test_054]
+    for t in run_tests:
+        if callable(t):
+            Scenario(test=t)()
+        else:
+            Scenario(test=t[0], args=t[1])()
+    #
     # define values for Operator upgrade test (test_009)
-
-    with Pool(3) as pool:
-        for scenario in loads(current_module(), Scenario, Suite):
-            if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
-                Scenario(run=scenario, parallel=True, executor=pool)
-        join()
-
-    for scenario in loads(current_module(), Scenario, Suite):
-        if hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags):
-            Scenario(run=scenario)
+    #
+    # with Pool(3) as pool:
+    #     for scenario in loads(current_module(), Scenario, Suite):
+    #         if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
+    #             Scenario(run=scenario, parallel=True, executor=pool)
+    #     join()
+    #
+    # for scenario in loads(current_module(), Scenario, Suite):
+    #     if hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags):
+    #         Scenario(run=scenario)
