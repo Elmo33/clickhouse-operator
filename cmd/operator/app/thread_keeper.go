@@ -59,7 +59,10 @@ func initKeeper(ctx context.Context) error {
 
 	err = ctrlRuntime.
 		NewControllerManagedBy(manager).
-		For(&api.ClickHouseKeeperInstallation{}, builder.WithPredicates(keeperPredicate())).
+		For(
+			&api.ClickHouseKeeperInstallation{},
+			builder.WithPredicates(keeperPredicate()),
+		).
 		Owns(&apps.StatefulSet{}).
 		Complete(
 			&controller.Controller{
