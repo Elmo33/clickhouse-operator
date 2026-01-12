@@ -27,7 +27,7 @@ import (
 // waitForIPAddresses waits for all pods to get IP address assigned
 func (w *worker) waitForIPAddresses(ctx context.Context, cr *apiChk.ClickHouseKeeperInstallation) {
 	if util.IsContextDone(ctx) {
-		log.V(1).Info("Reconcile is aborted. CR polling IP: %s ", chi.GetName())
+		log.V(1).Info("Reconcile is aborted. CR polling IP: %s ", cr.GetName())
 		return
 	}
 
