@@ -257,7 +257,7 @@ func (w *worker) reconcileCRServiceFinal(ctx context.Context, cr api.ICustomReso
 	defer log.V(2).F().E().Info("second stage")
 
 	if cr.IsStopped() {
-		// Stopped CHI must have no entry point
+		// Stopped CR must have no entry point
 		return nil
 	}
 
