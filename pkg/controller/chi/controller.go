@@ -154,7 +154,7 @@ func (c *Controller) addEventHandlersCHI(
 	chopInformerFactory.Clickhouse().V1().ClickHouseInstallations().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			chi := obj.(*api.ClickHouseInstallation)
-			if !shouldEnqueue(chi) {
+			if !ShouldEnqueue(chi) {
 				return
 			}
 			log.V(3).M(chi).Info("chiInformer.AddFunc")
@@ -163,7 +163,7 @@ func (c *Controller) addEventHandlersCHI(
 		UpdateFunc: func(old, new interface{}) {
 			oldChi := old.(*api.ClickHouseInstallation)
 			newChi := new.(*api.ClickHouseInstallation)
-			if !shouldEnqueue(newChi) {
+			if !ShouldEnqueue(newChi) {
 				return
 			}
 			log.V(3).M(newChi).Info("chiInformer.UpdateFunc")
@@ -924,7 +924,7 @@ func (c *Controller) handleObject(obj interface{}) {
 	// TODO c.enqueueObject(chi.Namespace, chi.Name, chi)
 }
 
-func shouldEnqueue(cr *api.ClickHouseInstallation) bool {
+func ShouldEnqueue(cr *api.ClickHouseInstallation) bool {
 	ns := cr.GetNamespace()
 	if !chop.Config().IsNamespaceWatched(ns) {
 		log.V(2).M(cr).Info("skip enqueue, namespace '%s' is not watched or is in deny list", ns)
