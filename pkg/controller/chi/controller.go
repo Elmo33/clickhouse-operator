@@ -924,15 +924,10 @@ func (c *Controller) handleObject(obj interface{}) {
 	// TODO c.enqueueObject(chi.Namespace, chi.Name, chi)
 }
 
-func shouldEnqueue(chi *api.ClickHouseInstallation) bool {
-	if !chop.Config().IsNamespaceWatched(chi.Namespace) {
-		log.V(2).M(chi).Info("chiInformer: skip enqueue, namespace '%s' is not watched or is in deny list", chi.Namespace)
-		return false
-	}
-
-	// if CR is suspended, should skip reconciliation
-	if chi.Spec.Suspend.Value() {
-		log.V(5).M(chi).Info("chiInformer: skip enqueue, CHI suspended")
+func shouldEnqueue(cr *api.ClickHouseInstallation) bool {
+	ns := cr.GetNamespace()
+	if !chop.Config().IsNamespaceWatched(ns) {
+		log.V(2).M(cr).Info("skip enqueue, namespace '%s' is not watched or is in deny list", ns)
 		return false
 	}
 
