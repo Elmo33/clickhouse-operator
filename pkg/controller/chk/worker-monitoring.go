@@ -19,9 +19,9 @@ import (
 )
 
 // excludeFromMonitoring excludes stopped CR from monitoring
-func (w *worker) excludeFromMonitoring(chi *api.ClickHouseKeeperInstallation) {
+func (w *worker) excludeFromMonitoring(cr *api.ClickHouseKeeperInstallation) {
 }
 
 // addToMonitoring adds CR to monitoring
-func (w *worker) addToMonitoring(chi *api.ClickHouseKeeperInstallation) {
+func (w *worker) addToMonitoring(cr *api.ClickHouseKeeperInstallation) {
 }
