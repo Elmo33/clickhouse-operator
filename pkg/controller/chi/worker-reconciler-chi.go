@@ -64,12 +64,18 @@ func (w *worker) reconcileCR(ctx context.Context, old, new *api.ClickHouseInstal
 	new = w.buildCR(ctx, new)
 
 	switch {
+	case new.Spec.Suspend.Value():
+		// if CR is suspended, should skip reconciliation
+		w.a.M(new).F().Info("Suspended CR")
+		metrics.CRReconcilesCompleted(ctx, new)
+		return nil
 	case new.EnsureRuntime().ActionPlan.HasActionsToDo():
 		w.a.M(new).F().Info("ActionPlan has actions - continue reconcile")
 	case w.isAfterFinalizerInstalled(new.GetAncestorT(), new):
 		w.a.M(new).F().Info("isAfterFinalizerInstalled - continue reconcile-2")
 	default:
 		w.a.M(new).F().Info("ActionPlan has no actions - abort reconcile")
+		metrics.CRReconcilesCompleted(ctx, new)
 		return nil
 	}
 
