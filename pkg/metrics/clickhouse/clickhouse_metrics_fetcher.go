@@ -28,8 +28,9 @@ const (
 		SELECT
 			database,
 			table,
-			toString(is_session_expired) AS is_session_expired
+			'1' AS session_expired
 		FROM system.replicas
+		WHERE is_session_expired
 	`
 
 	queryMetricsSQL = `
