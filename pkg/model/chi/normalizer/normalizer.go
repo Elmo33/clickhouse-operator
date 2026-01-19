@@ -443,7 +443,7 @@ func (n *Normalizer) normalizeReconcileRuntime(runtime chi.ReconcileRuntime) chi
 
 func (n *Normalizer) normalizeReconcileHost(rh chi.ReconcileHost) chi.ReconcileHost {
 	// Normalize
-	rh = rh.Normalize()
+	rh = rh.Normalize(types.NewStringBool(true), false)
 	return rh
 }
 
@@ -1005,7 +1005,9 @@ func (n *Normalizer) normalizeClusterLayoutShardsCountAndReplicasCount(clusterLa
 	return clusterLayout
 }
 
-func (n *Normalizer) normalizeClusterReconcile(reconcile chi.ClusterReconcile) chi.ClusterReconcile {
+func (n *Normalizer) normalizeClusterReconcile(reconcile *chi.ClusterReconcile) *chi.ClusterReconcile {
+	reconcile = reconcile.Ensure()
+
 	reconcile.Runtime = n.normalizeReconcileRuntime(reconcile.Runtime)
 	reconcile.Host = n.normalizeReconcileHost(reconcile.Host)
 	return reconcile
