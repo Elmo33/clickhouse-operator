@@ -27,7 +27,7 @@ type Cluster struct {
 	Templates         *apiChi.TemplatesList    `json:"templates,omitempty"         yaml:"templates,omitempty"`
 	PDBManaged        *types.StringBool        `json:"pdbManaged,omitempty"        yaml:"pdbManaged,omitempty"`
 	PDBMaxUnavailable *types.Int32             `json:"pdbMaxUnavailable,omitempty" yaml:"pdbMaxUnavailable,omitempty"`
-	Reconcile         *apiChi.ClusterReconcile `json:"reconcile"                   yaml:"reconcile,omitempty"`
+	Reconcile         *apiChi.ClusterReconcile `json:"reconcile,omitempty"         yaml:"reconcile,omitempty"`
 	Layout            *ChkClusterLayout        `json:"layout,omitempty"            yaml:"layout,omitempty"`
 
 	Runtime ChkClusterRuntime `json:"-" yaml:"-"`
