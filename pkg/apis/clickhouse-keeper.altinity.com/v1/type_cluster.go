@@ -21,15 +21,14 @@ import (
 
 // Cluster defines item of a clusters section of .configuration
 type Cluster struct {
-	Name string `json:"name,omitempty"         yaml:"name,omitempty"`
-
-	Settings          *apiChi.Settings        `json:"settings,omitempty"          yaml:"settings,omitempty"`
-	Files             *apiChi.Settings        `json:"files,omitempty"             yaml:"files,omitempty"`
-	Templates         *apiChi.TemplatesList   `json:"templates,omitempty"         yaml:"templates,omitempty"`
-	Layout            *ChkClusterLayout       `json:"layout,omitempty"            yaml:"layout,omitempty"`
-	PDBManaged        *types.StringBool       `json:"pdbManaged,omitempty"        yaml:"pdbManaged,omitempty"`
-	PDBMaxUnavailable *types.Int32            `json:"pdbMaxUnavailable,omitempty" yaml:"pdbMaxUnavailable,omitempty"`
-	Reconcile         apiChi.ClusterReconcile `json:"reconcile"                   yaml:"reconcile"`
+	Name              string                   `json:"name,omitempty"         yaml:"name,omitempty"`
+	Settings          *apiChi.Settings         `json:"settings,omitempty"          yaml:"settings,omitempty"`
+	Files             *apiChi.Settings         `json:"files,omitempty"             yaml:"files,omitempty"`
+	Templates         *apiChi.TemplatesList    `json:"templates,omitempty"         yaml:"templates,omitempty"`
+	PDBManaged        *types.StringBool        `json:"pdbManaged,omitempty"        yaml:"pdbManaged,omitempty"`
+	PDBMaxUnavailable *types.Int32             `json:"pdbMaxUnavailable,omitempty" yaml:"pdbMaxUnavailable,omitempty"`
+	Reconcile         *apiChi.ClusterReconcile `json:"reconcile"                   yaml:"reconcile,omitempty"`
+	Layout            *ChkClusterLayout        `json:"layout,omitempty"            yaml:"layout,omitempty"`
 
 	Runtime ChkClusterRuntime `json:"-" yaml:"-"`
 }
@@ -137,7 +136,8 @@ func (cluster *Cluster) GetPDBMaxUnavailable() *types.Int32 {
 }
 
 // GetReconcile is a getter
-func (cluster *Cluster) GetReconcile() apiChi.ClusterReconcile {
+func (cluster *Cluster) GetReconcile() *apiChi.ClusterReconcile {
+	cluster.Reconcile = cluster.Reconcile.Ensure()
 	return cluster.Reconcile
 }
 
@@ -182,7 +182,7 @@ func (cluster *Cluster) SelectSettingsSourceFrom(shard apiChi.IShard, replica ap
 	return replica
 }
 
-// InheritFilesFrom inherits files from CHI
+// InheritFilesFrom inherits files from CR
 func (cluster *Cluster) InheritFilesFrom(chk *ClickHouseKeeperInstallation) {
 	if chk.GetSpecT().Configuration == nil {
 		return
@@ -201,6 +201,17 @@ func (cluster *Cluster) InheritFilesFrom(chk *ClickHouseKeeperInstallation) {
 
 		return false
 	})
+}
+
+// InheritClusterReconcileFrom inherits reconcile runtime from CHI
+func (cluster *Cluster) InheritClusterReconcileFrom(chk *ClickHouseKeeperInstallation) {
+	if chk.Spec.Reconcile == nil {
+		return
+	}
+	reconcile := cluster.GetReconcile()
+	reconcile.Runtime = reconcile.Runtime.MergeFrom(chk.Spec.Reconcile.Runtime, apiChi.MergeTypeFillEmptyValues)
+	reconcile.Host = reconcile.Host.MergeFrom(chk.Spec.Reconcile.Host)
+	cluster.Reconcile = reconcile
 }
 
 // InheritTemplatesFrom inherits templates from CHI
