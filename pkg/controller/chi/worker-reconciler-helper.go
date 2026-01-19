@@ -69,8 +69,8 @@ func (w *worker) isHostSoftwareAbleToRespond(ctx context.Context, host *api.Host
 
 // getReconcileShardsWorkersNum calculates how many workers are allowed to be used for concurrent shards reconcile
 func (w *worker) getReconcileShardsWorkersNum(cluster *api.Cluster, opts *common.ReconcileShardsAndHostsOptions) int {
-	availableWorkers := float64(cluster.Reconcile.Runtime.ReconcileShardsThreadsNumber)
-	maxConcurrencyPercent := float64(cluster.Reconcile.Runtime.ReconcileShardsMaxConcurrencyPercent)
+	availableWorkers := float64(cluster.GetReconcile().Runtime.ReconcileShardsThreadsNumber)
+	maxConcurrencyPercent := float64(cluster.GetReconcile().Runtime.ReconcileShardsMaxConcurrencyPercent)
 	_100Percent := float64(100)
 	shardsNum := float64(len(cluster.Layout.Shards))
 
