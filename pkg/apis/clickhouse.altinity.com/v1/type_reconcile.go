@@ -44,6 +44,13 @@ type ClusterReconcile struct {
 	Host ReconcileHost `json:"host" yaml:"host"`
 }
 
+func (reconcile *ClusterReconcile) Ensure() *ClusterReconcile {
+	if reconcile == nil {
+		reconcile = &ClusterReconcile{}
+	}
+	return reconcile
+}
+
 // NewChiReconcile creates new reconcile
 func NewChiReconcile() *ChiReconcile {
 	return new(ChiReconcile)
