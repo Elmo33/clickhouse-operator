@@ -459,6 +459,7 @@ func (r *Reconciler) doDeleteStatefulSet(ctx context.Context, host *api.Host) er
 	namespace := host.Runtime.Address.Namespace
 	log.V(1).M(host).F().Info("%s/%s", namespace, name)
 
+	// Fetch cur host's StatefulSet
 	var err error
 	host.Runtime.CurStatefulSet, err = r.sts.Get(ctx, host)
 	if err != nil {
@@ -471,7 +472,7 @@ func (r *Reconciler) doDeleteStatefulSet(ctx context.Context, host *api.Host) er
 		return err
 	}
 
-	// Scale StatefulSet down to 0 pods count.
+	// Scale cur host's StatefulSet down to 0 pods count.
 	// This is the proper and graceful way to delete StatefulSet
 	var zero int32 = 0
 	host.Runtime.CurStatefulSet.Spec.Replicas = &zero
@@ -486,7 +487,6 @@ func (r *Reconciler) doDeleteStatefulSet(ctx context.Context, host *api.Host) er
 	// And now delete empty StatefulSet
 	if err := r.sts.Delete(ctx, namespace, name); err == nil {
 		log.V(1).M(host).Info("OK delete StatefulSet %s/%s", namespace, name)
-		//		r.hostSTSPoller.WaitHostStatefulSetDeleted(host)
 	} else if apiErrors.IsNotFound(err) {
 		log.V(1).M(host).Info("NEUTRAL not found StatefulSet %s/%s", namespace, name)
 	} else {
