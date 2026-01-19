@@ -476,7 +476,11 @@ func (in *Cluster) DeepCopyInto(out *Cluster) {
 		*out = new(types.Int32)
 		**out = **in
 	}
-	in.Reconcile.DeepCopyInto(&out.Reconcile)
+	if in.Reconcile != nil {
+		in, out := &in.Reconcile, &out.Reconcile
+		*out = new(clickhousealtinitycomv1.ClusterReconcile)
+		(*in).DeepCopyInto(*out)
+	}
 	in.Runtime.DeepCopyInto(&out.Runtime)
 	return
 }
