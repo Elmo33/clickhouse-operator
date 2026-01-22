@@ -39,7 +39,7 @@ import (
 const (
 	// Default values for update timeout and polling period in seconds
 	defaultStatefulSetUpdateTimeout      = 300
-	defaultStatefulSetUpdatePollInterval = 15
+	defaultStatefulSetUpdatePollInterval = 5
 
 	// Default values for ClickHouse user configuration
 	// 1. user/profile
@@ -134,6 +134,22 @@ const (
 
 	// What to do in case StatefulSet can't reach new Generation - do nothing, keep StatefulSet broken and move to the next
 	OnStatefulSetUpdateFailureActionIgnore = "ignore"
+)
+
+const (
+	// What to do in case StatefulSet needs to be recreated due to PVC data loss or missing volumes
+	// Abort - Loss: abort CHI reconcile
+	OnStatefulSetRecreateOnDataLossActionAbort = "abort"
+
+	// Recreate - Loss: proceed and recreate StatefulSet
+	OnStatefulSetRecreateOnDataLossActionRecreate = "recreate"
+
+	// What to do in case StatefulSet needs to be recreated due to update failure or StatefulSet not ready
+	// Abort - Failure: abort CHI reconcile
+	OnStatefulSetRecreateOnUpdateFailureActionAbort = "abort"
+
+	// Recreate - Failure: proceed and recreate StatefulSet
+	OnStatefulSetRecreateOnUpdateFailureActionRecreate = "recreate"
 )
 
 const (
@@ -422,10 +438,15 @@ type OperatorConfigReconcile struct {
 		} `json:"create" yaml:"create"`
 
 		Update struct {
-			Timeout      uint64 `json:"timeout" yaml:"timeout"`
+			Timeout      uint64 `json:"timeout"      yaml:"timeout"`
 			PollInterval uint64 `json:"pollInterval" yaml:"pollInterval"`
-			OnFailure    string `json:"onFailure" yaml:"onFailure"`
+			OnFailure    string `json:"onFailure"    yaml:"onFailure"`
 		} `json:"update" yaml:"update"`
+
+		Recreate struct {
+			OnDataLoss      string `json:"onDataLoss"      yaml:"onDataLoss"`
+			OnUpdateFailure string `json:"onUpdateFailure" yaml:"onUpdateFailure"`
+		} `json:"recreate" yaml:"recreate"`
 	} `json:"statefulSet" yaml:"statefulSet"`
 
 	Host ReconcileHost `json:"host" yaml:"host"`
@@ -1020,6 +1041,14 @@ func (c *OperatorConfig) normalizeSectionReconcileStatefulSet() {
 	// Default Updated Failure action - revert
 	if c.Reconcile.StatefulSet.Update.OnFailure == "" {
 		c.Reconcile.StatefulSet.Update.OnFailure = OnStatefulSetUpdateFailureActionRollback
+	}
+
+	// Default Recreate actions - recreate
+	if c.Reconcile.StatefulSet.Recreate.OnDataLoss == "" {
+		c.Reconcile.StatefulSet.Recreate.OnDataLoss = OnStatefulSetRecreateOnDataLossActionRecreate
+	}
+	if c.Reconcile.StatefulSet.Recreate.OnUpdateFailure == "" {
+		c.Reconcile.StatefulSet.Recreate.OnUpdateFailure = OnStatefulSetRecreateOnUpdateFailureActionRecreate
 	}
 }
 
