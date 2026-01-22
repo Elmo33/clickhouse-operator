@@ -423,6 +423,11 @@ func (n *Normalizer) normalizeReconcile(reconcile *chi.ChiReconcile) *chi.ChiRec
 	reconcile.InheritRuntimeFrom(chop.Config().Reconcile.Runtime)
 	reconcile.Runtime = n.normalizeReconcileRuntime(reconcile.Runtime)
 
+	// StatefulSet
+	// Inherit from chop Config
+	reconcile.InheritStatefulSetFrom(chop.Config().Reconcile)
+	reconcile.StatefulSet = n.normalizeReconcileStatefulSet(reconcile.StatefulSet)
+
 	// Host
 	// Inherit from chop Config
 	reconcile.InheritHostFrom(chop.Config().Reconcile.Host)
@@ -439,6 +444,31 @@ func (n *Normalizer) normalizeReconcileRuntime(runtime chi.ReconcileRuntime) chi
 		runtime.ReconcileShardsMaxConcurrencyPercent = defaultReconcileShardsMaxConcurrencyPercent
 	}
 	return runtime
+}
+
+func (n *Normalizer) normalizeReconcileStatefulSet(sts chi.ReconcileStatefulSet) chi.ReconcileStatefulSet {
+	// Create
+	if sts.Create.OnFailure == "" {
+		sts.Create.OnFailure = chi.OnStatefulSetCreateFailureActionDelete
+	}
+	// Update
+	if sts.Update.Timeout == 0 {
+		sts.Update.Timeout = defaultStatefulSetUpdateTimeout
+	}
+	if sts.Update.PollInterval == 0 {
+		sts.Update.PollInterval = defaultStatefulSetUpdatePollInterval
+	}
+	if sts.Update.OnFailure == "" {
+		sts.Update.OnFailure = chi.OnStatefulSetUpdateFailureActionRollback
+	}
+	// Recreate
+	if sts.Recreate.OnDataLoss == "" {
+		sts.Recreate.OnDataLoss = chi.OnStatefulSetRecreateOnDataLossActionRecreate
+	}
+	if sts.Recreate.OnUpdateFailure == "" {
+		sts.Recreate.OnUpdateFailure = chi.OnStatefulSetRecreateOnUpdateFailureActionRecreate
+	}
+	return sts
 }
 
 func (n *Normalizer) normalizeReconcileHost(rh chi.ReconcileHost) chi.ReconcileHost {
@@ -1009,6 +1039,7 @@ func (n *Normalizer) normalizeClusterReconcile(reconcile *chi.ClusterReconcile) 
 	reconcile = reconcile.Ensure()
 
 	reconcile.Runtime = n.normalizeReconcileRuntime(reconcile.Runtime)
+	reconcile.StatefulSet = n.normalizeReconcileStatefulSet(reconcile.StatefulSet)
 	reconcile.Host = n.normalizeReconcileHost(reconcile.Host)
 	return reconcile
 }
