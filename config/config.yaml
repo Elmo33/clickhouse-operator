@@ -349,6 +349,20 @@ reconcile:
       # 3. ignore - ignore an error, pretend nothing happened, continue reconcile and move on to the next StatefulSet.
       onFailure: abort
 
+    # Recreate StatefulSet scenario
+    recreate:
+      # What to do in case operator is in need to recreate StatefulSet?
+      # Possible options:
+      # 1. abort - abort the process, do nothing with the problematic StatefulSet, leave it as it is,
+      #    do not try to fix or delete or update it, just abort reconcile cycle.
+      #    Do not proceed to the next StatefulSet(s) and wait for an admin to assist.
+      # 2. recreate - proceed and recreate StatefulSet.
+
+      # Triggered when PVC data loss or missing volumes are detected
+      onDataLoss: recreate
+      # Triggered when StatefulSet update fails or StatefulSet is not ready
+      onUpdateFailure: recreate
+
   # Reconcile Host scenario
   host:
     # The operator during reconcile procedure should wait for a ClickHouse host to achieve the following conditions:
