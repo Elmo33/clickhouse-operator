@@ -236,6 +236,7 @@ func (cluster *Cluster) InheritClusterReconcileFrom(chi *ClickHouseInstallation)
 	}
 	reconcile := cluster.GetReconcile()
 	reconcile.Runtime = reconcile.Runtime.MergeFrom(chi.Spec.Reconcile.Runtime, MergeTypeFillEmptyValues)
+	reconcile.StatefulSet = reconcile.StatefulSet.MergeFrom(chi.Spec.Reconcile.StatefulSet)
 	reconcile.Host = reconcile.Host.MergeFrom(chi.Spec.Reconcile.Host)
 	cluster.Reconcile = reconcile
 }
