@@ -280,6 +280,11 @@ func (r *Reconciler) updateStatefulSet(ctx context.Context, host *api.Host, regi
 		r.a.V(1).M(host).Info("Update StatefulSet(%s/%s) - got ignore. Ignore", namespace, name)
 		return nil
 	case common.ErrCRUDRecreate:
+		onUpdateFailure := host.GetCluster().GetReconcile().StatefulSet.Recreate.OnUpdateFailure
+		if onUpdateFailure == api.OnStatefulSetRecreateOnUpdateFailureActionAbort {
+			r.a.V(1).M(host).Warning("Update StatefulSet(%s/%s) - would need recreate but aborting as configured (onUpdateFailure: abort)", namespace, name)
+			return common.ErrCRUDAbort
+		}
 		r.a.WithEvent(host.GetCR(), a.EventActionUpdate, a.EventReasonUpdateInProgress).
 			WithAction(host.GetCR()).
 			M(host).F().
@@ -321,37 +326,53 @@ func (r *Reconciler) createStatefulSet(ctx context.Context, host *api.Host, regi
 		})
 	}
 
+	return r.shouldAbortOrContinueCreateStatefulSet(action, host)
+}
+
+func (r *Reconciler) shouldAbortOrContinueCreateStatefulSet(action error, host *api.Host) error {
+	statefulSet := host.Runtime.DesiredStatefulSet
 	switch action {
 	case nil:
+		// Continue
 		r.a.V(1).
 			WithEvent(host.GetCR(), a.EventActionCreate, a.EventReasonCreateCompleted).
 			WithAction(host.GetCR()).
 			M(host).F().
 			Info("Create StatefulSet: %s - completed", util.NamespaceNameString(statefulSet))
 		return nil
+
 	case common.ErrCRUDAbort:
+		// Abort
 		r.a.WithEvent(host.GetCR(), a.EventActionCreate, a.EventReasonCreateFailed).
 			WithAction(host.GetCR()).
 			WithError(host.GetCR()).
 			M(host).F().
 			Error("Create StatefulSet: %s - failed with error: %v", util.NamespaceNameString(statefulSet), action)
-		return action
+		return common.ErrCRUDAbort
+
 	case common.ErrCRUDIgnore:
+		// Continue
 		r.a.WithEvent(host.GetCR(), a.EventActionCreate, a.EventReasonCreateFailed).
 			WithAction(host.GetCR()).
 			M(host).F().
 			Warning("Create StatefulSet: %s - error ignored", util.NamespaceNameString(statefulSet))
 		return nil
+
 	case common.ErrCRUDRecreate:
+		// Continue
 		r.a.V(1).M(host).Warning("Got recreate action. Ignore and continue for now")
 		return nil
+
 	case common.ErrCRUDUnexpectedFlow:
+		// Continue
 		r.a.V(1).M(host).Warning("Got unexpected flow action. Ignore and continue for now")
 		return nil
-	}
 
-	r.a.V(1).M(host).Warning("Got unexpected flow. This is strange. Ignore and continue for now")
-	return nil
+	default:
+		// Continue
+		r.a.V(1).M(host).Warning("Got unexpected flow. This is strange. Ignore and continue for now")
+		return nil
+	}
 }
 
 // createStatefulSet is an internal function, used in reconcileStatefulSet only
