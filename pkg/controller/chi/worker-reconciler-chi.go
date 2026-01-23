@@ -778,15 +778,26 @@ func (w *worker) reconcileHostMain(ctx context.Context, host *api.Host) error {
 
 	w.a.V(1).M(host).F().Info("Reconcile PVCs and data loss for host: %s", host.GetName())
 
-	// In case data loss or volumes missing detected we may need to specify additional reconcile options
+	// In case data loss or volumes missing detected we may
+	// 1. need to specify additional reconcile options
+	// 2. abort the reconcile completely
 	err := w.reconcileHostPVCs(ctx, host)
+	onDataLoss := host.GetCluster().GetReconcile().StatefulSet.Recreate.OnDataLoss
 	switch {
 	case storage.ErrIsDataLoss(err):
+		if onDataLoss == api.OnStatefulSetRecreateOnDataLossActionAbort {
+			w.a.V(1).M(host).F().Warning("Data loss detected for host: %s. Aborting reconcile as configured (onDataLoss: abort)", host.GetName())
+			return common.ErrCRUDAbort
+		}
 		stsReconcileOpts, migrateTableOpts = w.hostPVCsDataLossDetectedOptions(host)
 		w.a.V(1).
 			M(host).F().
 			Info("Data loss detected for host: %s.", host.GetName())
 	case storage.ErrIsVolumeMissed(err):
+		if onDataLoss == api.OnStatefulSetRecreateOnDataLossActionAbort {
+			w.a.V(1).M(host).F().Warning("Data volume missed for host: %s. Aborting reconcile as configured (onDataLoss: abort)", host.GetName())
+			return common.ErrCRUDAbort
+		}
 		// stsReconcileOpts, migrateTableOpts = w.hostPVCsDataVolumeMissedDetectedOptions(host)
 		stsReconcileOpts, migrateTableOpts = w.hostPVCsDataLossDetectedOptions(host)
 		w.a.V(1).
