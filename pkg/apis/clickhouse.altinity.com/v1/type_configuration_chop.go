@@ -371,6 +371,11 @@ type OperatorConfigClickHouse struct {
 		Timeouts struct {
 			Collect time.Duration `json:"collect" yaml:"collect"`
 		} `json:"timeouts" yaml:"timeouts"`
+		// TablesRegexp specifies regexp to match tables in system database to fetch metrics from.
+		// Multiple tables can be matched using regexp. Matched tables are merged using merge() table function.
+		// Default is "^(metrics|custom_metrics)$" which fetches from both system.metrics and system.custom_metrics.
+		// Set to empty string to fetch only from system.metrics without using merge().
+		TablesRegexp string `json:"tablesRegexp" yaml:"tablesRegexp"`
 	} `json:"metrics" yaml:"metrics"`
 }
 
