@@ -161,10 +161,9 @@ func (f *ClickHouseMetricsFetcher) connection() *clickhouse.Connection {
 
 // buildMetricsTableSource returns the FROM clause for the metrics query.
 // If tablesRegexp is set, it uses merge() to query tables matching the regexp.
-// Otherwise, it queries only system.metrics.
 func (f *ClickHouseMetricsFetcher) buildMetricsTableSource() string {
 	if f.tablesRegexp == "" {
-		return "system.metrics"
+		return "merge('system','^(metrics|custom_metrics)$')"
 	}
 	return fmt.Sprintf("merge('system','%s')", f.tablesRegexp)
 }
