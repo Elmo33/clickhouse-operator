@@ -78,6 +78,9 @@ const (
 	// defaultTimeoutCollect specifies default timeout to collect metrics from the ClickHouse instance. In seconds
 	defaultTimeoutCollect = 8
 
+	// defaultMetricsTablesRegexp specifies default regexp to match tables in system database to fetch metrics from
+	defaultMetricsTablesRegexp = "^(metrics|custom_metrics)$"
+
 	// defaultReconcileCHIsThreadsNumber specifies default number of controller threads running concurrently.
 	// Used in case no other specified in config
 	defaultReconcileCHIsThreadsNumber = 1
@@ -374,7 +377,6 @@ type OperatorConfigClickHouse struct {
 		// TablesRegexp specifies regexp to match tables in system database to fetch metrics from.
 		// Multiple tables can be matched using regexp. Matched tables are merged using merge() table function.
 		// Default is "^(metrics|custom_metrics)$" which fetches from both system.metrics and system.custom_metrics.
-		// Set to empty string to fetch only from system.metrics without using merge().
 		TablesRegexp string `json:"tablesRegexp" yaml:"tablesRegexp"`
 	} `json:"metrics" yaml:"metrics"`
 }
@@ -1142,6 +1144,10 @@ func (c *OperatorConfig) normalizeSectionClickHouseMetrics() {
 	}
 	// Adjust seconds to time.Duration
 	c.ClickHouse.Metrics.Timeouts.Collect = c.ClickHouse.Metrics.Timeouts.Collect * time.Second
+
+	if c.ClickHouse.Metrics.TablesRegexp == "" {
+		c.ClickHouse.Metrics.TablesRegexp = defaultMetricsTablesRegexp
+	}
 }
 
 func (c *OperatorConfig) normalizeSectionLogger() {
