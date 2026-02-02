@@ -32,6 +32,8 @@ crdHook:
   tolerations: []
   # crdHook.affinity -- affinity for CRD installation job
   affinity: {}
+  # crdHook.annotations -- additional annotations for CRD installation job
+  annotations: {}
 operator:
   image:
     # operator.image.repository -- image repository
