@@ -18,6 +18,10 @@ crdHook:
     tag: "latest"
     # crdHook.image.pullPolicy -- image pull policy for CRD installation job
     pullPolicy: IfNotPresent
+  # crdHook.imagePullSecrets -- image pull secrets for CRD installation job
+  # possible value format `[{"name":"your-secret-name"}]`,
+  # check `kubectl explain pod.spec.imagePullSecrets` for details
+  imagePullSecrets: []
   # crdHook.resources -- resource limits and requests for CRD installation job
   resources: {}
   #  limits:
