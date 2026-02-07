@@ -163,5 +163,31 @@ spec:
 ...
 ```
 
+#### Applying Changes from ClickHouseInstallationTemplates
+
+Changes applied to a ClickHouseInstallationTemaplte do not automatically trigger a reconcile of the ClickHouseInstallations using the template. This is by design and intended to preserve user control and prevent undesirable rollouts to ClickHouseInstallations. 
+
+To apply the changes to ClickHouseInstallations, update the spec.taskID:
+
+```
+apiVersion: "clickhouse.altinity.com/v1"
+kind: "ClickHouseInstallation"
+...
+spec:
+  taskID: "randomly-generated-string"
+...
+```
+
+> Note, ClickHouse settings applied to the ClickHouse server through `spec.configuration.settings` in a ClickHouseInstallationTemplate will not trigger a server restart whether or not the setting requires a server restart to be applied. To apply the settings and restart the server, you should also set `spec.restart` to `'RollingUpdate'`. RollingUpdate should be used sparingly. It is typically removed after usage to prevent unecessary restarts:
+
+```
+apiVersion: "clickhouse.altinity.com/v1"
+kind: "ClickHouseInstallation"
+...
+spec:
+  restart: "RollingUpdate"
+...
+```
+
 [clickhouse-operator-install-bundle.yaml]: ../deploy/operator/clickhouse-operator-install-bundle.yaml
 [70-chop-config.yaml]: ./chi-examples/70-chop-config.yaml
