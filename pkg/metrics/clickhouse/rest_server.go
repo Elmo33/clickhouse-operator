@@ -15,56 +15,115 @@
 package clickhouse
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	log "github.com/golang/glog"
-	// log "k8s.io/klog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/altinity/clickhouse-operator/pkg/apis/metrics"
 )
 
-// StartMetricsREST start Prometheus metrics exporter in background
-func StartMetricsREST(
-	metricsAddress string,
-	metricsPath string,
-	collectorTimeout time.Duration,
-
-	chiListAddress string,
-	chiListPath string,
-) *Exporter {
-	log.V(1).Infof("Starting metrics exporter at '%s%s'\n", metricsAddress, metricsPath)
-
-	exporter := NewExporter(collectorTimeout)
-	prometheus.MustRegister(exporter)
-
-	http.Handle(metricsPath, promhttp.Handler())
-	http.Handle(chiListPath, exporter)
-
-	go http.ListenAndServe(metricsAddress, nil)
-	if metricsAddress != chiListAddress {
-		go http.ListenAndServe(chiListAddress, nil)
-	}
-
-	return exporter
+// RESTServer provides HTTP API for managing watched CRs
+type RESTServer struct {
+	registry *CRRegistry
 }
 
-// ServeHTTP is an interface method to serve HTTP requests
-func (e *Exporter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// NewRESTServer creates a new RESTServer instance
+func NewRESTServer(registry *CRRegistry) *RESTServer {
+	return &RESTServer{
+		registry: registry,
+	}
+}
+
+// ServeHTTP implements http.Handler interface
+func (s *RESTServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/chi" {
 		http.Error(w, "404 not found.", http.StatusNotFound)
 		return
 	}
 
 	switch r.Method {
-	case "GET":
-		e.getWatchedCHI(w, r)
-	case "POST":
-		e.updateWatchedCHI(w, r)
-	case "DELETE":
-		e.deleteWatchedCHI(w, r)
+	case http.MethodGet:
+		s.handleGet(w, r)
+	case http.MethodPost:
+		s.handlePost(w, r)
+	case http.MethodDelete:
+		s.handleDelete(w, r)
 	default:
 		_, _ = fmt.Fprintf(w, "Sorry, only GET, POST and DELETE methods are supported.")
 	}
+}
+
+// handleGet serves HTTP GET request to get list of watched CRs
+func (s *RESTServer) handleGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.registry.List())
+}
+
+// handlePost serves HTTP POST request to add CR to the list of watched CRs
+func (s *RESTServer) handlePost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if cr, err := s.decodeCR(r); err == nil {
+		s.registry.Add(cr)
+	} else {
+		http.Error(w, err.Error(), http.StatusNotAcceptable)
+	}
+}
+
+// handleDelete serves HTTP DELETE request to delete CR from the list of watched CRs
+func (s *RESTServer) handleDelete(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if cr, err := s.decodeCR(r); err == nil {
+		s.registry.EnqueueRemove(cr)
+	} else {
+		http.Error(w, err.Error(), http.StatusNotAcceptable)
+	}
+}
+
+// decodeCR decodes CR from the HTTP request body
+func (s *RESTServer) decodeCR(r *http.Request) (*metrics.WatchedCR, error) {
+	cr := &metrics.WatchedCR{}
+	if err := json.NewDecoder(r.Body).Decode(cr); err == nil {
+		if cr.IsValid() {
+			return cr, nil
+		}
+	}
+	return nil, fmt.Errorf("unable to parse CR from request")
+}
+
+// StartMetricsREST starts Prometheus metrics exporter and REST API server
+func StartMetricsREST(
+	metricsAddress string,
+	metricsPath string,
+	collectorTimeout time.Duration,
+	chiListAddress string,
+	chiListPath string,
+) (*Exporter, *CRRegistry) {
+	log.V(1).Infof("Starting metrics exporter at '%s%s'\n", metricsAddress, metricsPath)
+
+	// Create shared registry
+	registry := NewCRRegistry()
+
+	// Create and register Prometheus exporter
+	exporter := NewExporter(registry, collectorTimeout)
+	prometheus.MustRegister(exporter)
+
+	// Create REST server
+	restServer := NewRESTServer(registry)
+
+	// Setup HTTP handlers
+	http.Handle(metricsPath, promhttp.Handler())
+	http.Handle(chiListPath, restServer)
+
+	// Start HTTP servers
+	go http.ListenAndServe(metricsAddress, nil)
+	if metricsAddress != chiListAddress {
+		go http.ListenAndServe(chiListAddress, nil)
+	}
+
+	return exporter, registry
 }
