@@ -96,7 +96,7 @@ func Run() {
 	chop.New(kubeClient, chopClient, chopConfigFile)
 	log.Info(chop.Config().String(true))
 
-	exporter := clickhouse.StartMetricsREST(
+	exporter, _ := clickhouse.StartMetricsREST(
 		metricsEP,
 		metricsPath,
 		chop.Config().ClickHouse.Metrics.Timeouts.Collect,
