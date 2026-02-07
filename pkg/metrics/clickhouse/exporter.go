@@ -147,7 +147,7 @@ func (e *Exporter) updateWatched(chi *metrics.WatchedCR) {
 }
 
 // newFetcher returns new Metrics Fetcher for specified host
-func (e *Exporter) newHostFetcher(host *metrics.WatchedHost) *ClickHouseMetricsFetcher {
+func (e *Exporter) newHostFetcher(host *metrics.WatchedHost) *MetricsFetcher {
 	// Make base cluster connection params
 	clusterConnectionParams := clickhouse.NewClusterConnectionParamsFromCHOpConfig(chop.Config())
 	// Adjust base cluster connection params with per-host props
@@ -167,7 +167,7 @@ func (e *Exporter) newHostFetcher(host *metrics.WatchedHost) *ClickHouseMetricsF
 		clusterConnectionParams.Port = int(host.HTTPSPort)
 	}
 
-	return NewClickHouseFetcher(
+	return NewMetricsFetcher(
 		clusterConnectionParams.NewEndpointConnectionParams(host.Hostname),
 		chop.Config().ClickHouse.Metrics.TablesRegexp,
 	)
@@ -180,27 +180,27 @@ func (e *Exporter) collectHostMetrics(ctx context.Context, chi *metrics.WatchedC
 
 	wg := sync.WaitGroup{}
 	wg.Add(6)
-	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *ClickHouseMetricsFetcher, writer *CHIPrometheusWriter) {
+	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *MetricsFetcher, writer *CHIPrometheusWriter) {
 		e.collectHostSystemMetrics(ctx, host, fetcher, writer)
 		wg.Done()
 	}(ctx, host, fetcher, writer)
-	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *ClickHouseMetricsFetcher, writer *CHIPrometheusWriter) {
+	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *MetricsFetcher, writer *CHIPrometheusWriter) {
 		e.collectHostSystemPartsMetrics(ctx, host, fetcher, writer)
 		wg.Done()
 	}(ctx, host, fetcher, writer)
-	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *ClickHouseMetricsFetcher, writer *CHIPrometheusWriter) {
+	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *MetricsFetcher, writer *CHIPrometheusWriter) {
 		e.collectHostSystemReplicasMetrics(ctx, host, fetcher, writer)
 		wg.Done()
 	}(ctx, host, fetcher, writer)
-	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *ClickHouseMetricsFetcher, writer *CHIPrometheusWriter) {
+	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *MetricsFetcher, writer *CHIPrometheusWriter) {
 		e.collectHostMutationsMetrics(ctx, host, fetcher, writer)
 		wg.Done()
 	}(ctx, host, fetcher, writer)
-	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *ClickHouseMetricsFetcher, writer *CHIPrometheusWriter) {
+	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *MetricsFetcher, writer *CHIPrometheusWriter) {
 		e.collectHostSystemDisksMetrics(ctx, host, fetcher, writer)
 		wg.Done()
 	}(ctx, host, fetcher, writer)
-	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *ClickHouseMetricsFetcher, writer *CHIPrometheusWriter) {
+	go func(ctx context.Context, host *metrics.WatchedHost, fetcher *MetricsFetcher, writer *CHIPrometheusWriter) {
 		e.collectHostDetachedPartsMetrics(ctx, host, fetcher, writer)
 		wg.Done()
 	}(ctx, host, fetcher, writer)
@@ -210,7 +210,7 @@ func (e *Exporter) collectHostMetrics(ctx context.Context, chi *metrics.WatchedC
 func (e *Exporter) collectHostSystemMetrics(
 	ctx context.Context,
 	host *metrics.WatchedHost,
-	fetcher *ClickHouseMetricsFetcher,
+	fetcher *MetricsFetcher,
 	writer *CHIPrometheusWriter,
 ) {
 	log.V(1).Infof("Querying system metrics for host %s", host.Hostname)
@@ -231,7 +231,7 @@ func (e *Exporter) collectHostSystemMetrics(
 func (e *Exporter) collectHostSystemPartsMetrics(
 	ctx context.Context,
 	host *metrics.WatchedHost,
-	fetcher *ClickHouseMetricsFetcher,
+	fetcher *MetricsFetcher,
 	writer *CHIPrometheusWriter,
 ) {
 	log.V(1).Infof("Querying table sizes for host %s", host.Hostname)
@@ -255,7 +255,7 @@ func (e *Exporter) collectHostSystemPartsMetrics(
 func (e *Exporter) collectHostSystemReplicasMetrics(
 	ctx context.Context,
 	host *metrics.WatchedHost,
-	fetcher *ClickHouseMetricsFetcher,
+	fetcher *MetricsFetcher,
 	writer *CHIPrometheusWriter,
 ) {
 	log.V(1).Infof("Querying system replicas for host %s", host.Hostname)
@@ -276,7 +276,7 @@ func (e *Exporter) collectHostSystemReplicasMetrics(
 func (e *Exporter) collectHostMutationsMetrics(
 	ctx context.Context,
 	host *metrics.WatchedHost,
-	fetcher *ClickHouseMetricsFetcher,
+	fetcher *MetricsFetcher,
 	writer *CHIPrometheusWriter,
 ) {
 	log.V(1).Infof("Querying mutations for host %s", host.Hostname)
@@ -297,7 +297,7 @@ func (e *Exporter) collectHostMutationsMetrics(
 func (e *Exporter) collectHostSystemDisksMetrics(
 	ctx context.Context,
 	host *metrics.WatchedHost,
-	fetcher *ClickHouseMetricsFetcher,
+	fetcher *MetricsFetcher,
 	writer *CHIPrometheusWriter,
 ) {
 	log.V(1).Infof("Querying disks for host %s", host.Hostname)
@@ -318,7 +318,7 @@ func (e *Exporter) collectHostSystemDisksMetrics(
 func (e *Exporter) collectHostDetachedPartsMetrics(
 	ctx context.Context,
 	host *metrics.WatchedHost,
-	fetcher *ClickHouseMetricsFetcher,
+	fetcher *MetricsFetcher,
 	writer *CHIPrometheusWriter,
 ) {
 	log.V(1).Infof("Querying detached parts for host %s", host.Hostname)
