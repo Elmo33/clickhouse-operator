@@ -43,8 +43,8 @@ import (
 type Exporter struct {
 	collectorTimeout time.Duration
 
-	// chInstallations maps CHI name to list of hostnames (of string type) of this installation
-	chInstallations chInstallationsIndex
+	// crInstallations maps CR name to list of hostnames (of string type) of this CR
+	crInstallations crInstallationsIndex
 
 	mutex               sync.RWMutex
 	toRemoveFromWatched sync.Map
@@ -56,14 +56,14 @@ var _ prometheus.Collector = &Exporter{}
 // NewExporter returns a new instance of Exporter type
 func NewExporter(collectorTimeout time.Duration) *Exporter {
 	return &Exporter{
-		chInstallations:  make(map[string]*metrics.WatchedCR),
+		crInstallations:  make(map[string]*metrics.WatchedCR),
 		collectorTimeout: collectorTimeout,
 	}
 }
 
 // getWatchedCHIs
 func (e *Exporter) getWatchedCHIs() []*metrics.WatchedCR {
-	return e.chInstallations.slice()
+	return e.crInstallations.slice()
 }
 
 // Collect implements prometheus.Collector Collect method
@@ -94,7 +94,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	log.V(1).Infof("Launching host collectors [%s]", time.Since(start))
 
 	var wg = sync.WaitGroup{}
-	e.chInstallations.walk(func(chi *metrics.WatchedCR, _ *metrics.WatchedCluster, host *metrics.WatchedHost) {
+	e.crInstallations.walk(func(chi *metrics.WatchedCR, _ *metrics.WatchedCluster, host *metrics.WatchedHost) {
 		wg.Add(1)
 		go func(ctx context.Context, chi *metrics.WatchedCR, host *metrics.WatchedHost, ch chan<- prometheus.Metric) {
 			defer wg.Done()
@@ -135,7 +135,7 @@ func (e *Exporter) removeFromWatched(chi *metrics.WatchedCR) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 	log.V(1).Infof("Remove ClickHouseInstallation (%s/%s)", chi.Namespace, chi.Name)
-	e.chInstallations.remove(chi.IndexKey())
+	e.crInstallations.remove(chi.IndexKey())
 }
 
 // updateWatched updates Exporter.chInstallation map with values from chInstances slice
@@ -143,7 +143,7 @@ func (e *Exporter) updateWatched(chi *metrics.WatchedCR) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 	log.V(1).Infof("Update ClickHouseInstallation (%s/%s): %s", chi.Namespace, chi.Name, chi)
-	e.chInstallations.set(chi.IndexKey(), chi)
+	e.crInstallations.set(chi.IndexKey(), chi)
 }
 
 // newFetcher returns new Metrics Fetcher for specified host
