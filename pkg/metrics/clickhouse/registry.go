@@ -23,26 +23,10 @@ import (
 	"github.com/altinity/clickhouse-operator/pkg/apis/metrics"
 )
 
-// removeType identifies what type of entity to remove
-type removeType int
-
-const (
-	removeTypeCR removeType = iota
-	removeTypeHost
-)
-
-// removeRequest represents a pending removal request
-type removeRequest struct {
-	removeType removeType
-	cr         *metrics.WatchedCR
-	host       *HostRequest
-}
-
 // CRRegistry is a thread-safe storage for watched Custom Resources
 type CRRegistry struct {
-	index    crInstallationsIndex
-	mutex    sync.RWMutex
-	toRemove sync.Map
+	index crInstallationsIndex
+	mutex sync.RWMutex
 }
 
 // NewCRRegistry creates a new CRRegistry instance
@@ -134,38 +118,6 @@ func (r *CRRegistry) RemoveHost(req *HostRequest) {
 	}
 }
 
-// EnqueueRemoveCR enqueues a CR for removal (will be removed on next Cleanup)
-func (r *CRRegistry) EnqueueRemoveCR(cr *metrics.WatchedCR) {
-	req := &removeRequest{removeType: removeTypeCR, cr: cr}
-	r.toRemove.Store(req, struct{}{})
-}
-
-// EnqueueRemoveHost enqueues a host for removal (will be removed on next Cleanup)
-func (r *CRRegistry) EnqueueRemoveHost(host *HostRequest) {
-	req := &removeRequest{removeType: removeTypeHost, host: host}
-	r.toRemove.Store(req, struct{}{})
-}
-
-// Cleanup processes all CRs and hosts enqueued for removal
-func (r *CRRegistry) Cleanup() {
-	log.V(2).Info("Registry: Starting cleanup")
-	r.toRemove.Range(func(key, value interface{}) bool {
-		r.toRemove.Delete(key)
-		if req, ok := key.(*removeRequest); ok {
-			switch req.removeType {
-			case removeTypeCR:
-				r.RemoveCR(req.cr)
-				log.V(1).Infof("Registry: Cleaned up CR (%s/%s)", req.cr.Namespace, req.cr.Name)
-			case removeTypeHost:
-				r.RemoveHost(req.host)
-				log.V(1).Infof("Registry: Cleaned up Host %s from CR (%s/%s)", req.host.Host.Hostname, req.host.CRNamespace, req.host.CRName)
-			}
-		}
-		return true
-	})
-	log.V(2).Info("Registry: Completed cleanup")
-}
-
 // List returns all watched CRs as a slice
 func (r *CRRegistry) List() []*metrics.WatchedCR {
 	r.mutex.RLock()
@@ -174,7 +126,6 @@ func (r *CRRegistry) List() []*metrics.WatchedCR {
 }
 
 // Walk iterates over all hosts while holding an exclusive lock
-// Use this when the iteration may modify state
 func (r *CRRegistry) Walk(fn func(*metrics.WatchedCR, *metrics.WatchedCluster, *metrics.WatchedHost)) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
