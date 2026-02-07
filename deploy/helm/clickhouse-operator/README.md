@@ -75,10 +75,12 @@ crdHook:
 | commonLabels | object | `{}` | set of labels that will be applied to all the resources for the operator |
 | configs | object | check the `values.yaml` file for the config content (auto-generated from latest operator release) | clickhouse operator configs |
 | crdHook.affinity | object | `{}` | affinity for CRD installation job |
+| crdHook.annotations | object | `{}` | additional annotations for CRD installation job |
 | crdHook.enabled | bool | `true` | enable automatic CRD installation/update via pre-install/pre-upgrade hooks when disabled, CRDs must be installed manually using kubectl apply |
 | crdHook.image.pullPolicy | string | `"IfNotPresent"` | image pull policy for CRD installation job |
 | crdHook.image.repository | string | `"bitnami/kubectl"` | image repository for CRD installation job |
 | crdHook.image.tag | string | `"latest"` | image tag for CRD installation job |
+| crdHook.imagePullSecrets | list | `[]` | image pull secrets for CRD installation job possible value format `[{"name":"your-secret-name"}]`, check `kubectl explain pod.spec.imagePullSecrets` for details |
 | crdHook.nodeSelector | object | `{}` | node selector for CRD installation job |
 | crdHook.resources | object | `{}` | resource limits and requests for CRD installation job |
 | crdHook.tolerations | list | `[]` | tolerations for CRD installation job |
