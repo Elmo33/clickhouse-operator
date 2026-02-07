@@ -394,7 +394,7 @@ func (e *Exporter) DiscoveryWatchedCHIs(kubeClient kube.Interface, chopClient *c
 }
 
 func (e *Exporter) processDiscoveredCR(kubeClient kube.Interface, chi *api.ClickHouseInstallation) {
-	if e.shouldNotWatchCR(chi) {
+	if !e.shouldWatchCR(chi) {
 		log.V(1).Infof("Skip discovered CHI: %s/%s", chi.Namespace, chi.Name)
 		return
 	}
@@ -410,11 +410,11 @@ func (e *Exporter) processDiscoveredCR(kubeClient kube.Interface, chi *api.Click
 	e.updateWatched(watchedCHI)
 }
 
-func (e *Exporter) shouldNotWatchCR(chi *api.ClickHouseInstallation) bool {
+func (e *Exporter) shouldWatchCR(chi *api.ClickHouseInstallation) bool {
 	if chi.IsStopped() {
 		log.V(1).Infof("CHI %s/%s is stopped, unable to watch it", chi.Namespace, chi.Name)
-		return true
+		return false
 	}
 
-	return false
+	return true
 }
