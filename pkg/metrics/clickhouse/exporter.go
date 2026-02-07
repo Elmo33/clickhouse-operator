@@ -55,9 +55,6 @@ func NewExporter(registry *CRRegistry, collectorTimeout time.Duration) *Exporter
 
 // Collect implements prometheus.Collector Collect method
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	// Run cleanup on each collect
-	e.registry.Cleanup()
-
 	if ch == nil {
 		log.Warning("Prometheus channel is closed. Unable to write metrics")
 		return
@@ -161,7 +158,7 @@ func (e *Exporter) processDiscoveredCR(kubeClient kube.Interface, chi *api.Click
 	normalized, _ := normalizer.CreateTemplated(chi, normalizerCommon.NewOptions[api.ClickHouseInstallation]())
 
 	watchedCR := metrics.NewWatchedCR(normalized)
-	e.registry.Add(watchedCR)
+	e.registry.AddCR(watchedCR)
 }
 
 func (e *Exporter) shouldWatchCR(chi *api.ClickHouseInstallation) bool {
