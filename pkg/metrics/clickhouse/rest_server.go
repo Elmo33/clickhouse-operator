@@ -35,9 +35,9 @@ const (
 
 // RESTRequest wraps different request types for POST/DELETE operations
 type RESTRequest struct {
-	Type string              `json:"type"` // "cr" or "host"
-	CR   *metrics.WatchedCR  `json:"cr,omitempty"`
-	Host *HostRequest        `json:"host,omitempty"`
+	Type string             `json:"type"` // "cr" or "host"
+	CR   *metrics.WatchedCR `json:"cr,omitempty"`
+	Host *HostRequest       `json:"host,omitempty"`
 }
 
 // HostRequest contains host details with parent context
