@@ -43,7 +43,7 @@ import (
 type Exporter struct {
 	collectorTimeout time.Duration
 
-	// crInstallations maps CR name to list of hostnames (of string type) of this CR
+	// crInstallations is an index of watched CRs
 	crInstallations crInstallationsIndex
 
 	mutex               sync.RWMutex
@@ -83,7 +83,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		log.V(1).Infof("Collect completed [%s]", time.Since(start))
 	}()
 
-	// Collect should have timeout
+	// Collection process should have limited duration
 	ctx, cancel := context.WithTimeout(context.Background(), e.collectorTimeout)
 	defer cancel()
 
@@ -130,7 +130,7 @@ func (e *Exporter) cleanup() {
 	log.V(2).Info("Completed cleanup")
 }
 
-// removeFromWatched deletes record from Exporter.chInstallation map identified by chiName key
+// removeFromWatched deletes record from watched index
 func (e *Exporter) removeFromWatched(chi *metrics.WatchedCR) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
@@ -138,7 +138,7 @@ func (e *Exporter) removeFromWatched(chi *metrics.WatchedCR) {
 	e.crInstallations.remove(chi.IndexKey())
 }
 
-// updateWatched updates Exporter.chInstallation map with values from chInstances slice
+// updateWatched updates watched index
 func (e *Exporter) updateWatched(chi *metrics.WatchedCR) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
@@ -354,7 +354,7 @@ func (e *Exporter) fetchCHI(r *http.Request) (*metrics.WatchedCR, error) {
 	return nil, fmt.Errorf("unable to parse CHI from request")
 }
 
-// updateWatchedCHI serves HTTPS request to add CHI to the list of watched CHIs
+// updateWatchedCHI serves HTTP request to add CHI to the list of watched CHIs
 func (e *Exporter) updateWatchedCHI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if chi, err := e.fetchCHI(r); err == nil {
@@ -394,7 +394,7 @@ func (e *Exporter) DiscoveryWatchedCHIs(kubeClient kube.Interface, chopClient *c
 }
 
 func (e *Exporter) processDiscoveredCR(kubeClient kube.Interface, chi *api.ClickHouseInstallation) {
-	if e.shouldSkipDiscoveredCR(chi) {
+	if e.shouldNotWatchCR(chi) {
 		log.V(1).Infof("Skip discovered CHI: %s/%s", chi.Namespace, chi.Name)
 		return
 	}
@@ -410,9 +410,9 @@ func (e *Exporter) processDiscoveredCR(kubeClient kube.Interface, chi *api.Click
 	e.updateWatched(watchedCHI)
 }
 
-func (e *Exporter) shouldSkipDiscoveredCR(chi *api.ClickHouseInstallation) bool {
+func (e *Exporter) shouldNotWatchCR(chi *api.ClickHouseInstallation) bool {
 	if chi.IsStopped() {
-		log.V(1).Infof("CHI %s/%s is stopped, skip it", chi.Namespace, chi.Name)
+		log.V(1).Infof("CHI %s/%s is stopped, unable to watch it", chi.Namespace, chi.Name)
 		return true
 	}
 
