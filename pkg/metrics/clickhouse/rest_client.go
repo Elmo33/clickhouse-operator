@@ -18,10 +18,20 @@ import "github.com/altinity/clickhouse-operator/pkg/apis/metrics"
 
 // InformMetricsExporterAboutWatchedCHI informs exporter about new watched CHI
 func InformMetricsExporterAboutWatchedCHI(chi *metrics.WatchedCR) error {
-	return makeRESTCall(chi, "POST")
+	return makeRESTCall(&RESTRequest{Type: RequestTypeCR, CR: chi}, "POST")
 }
 
 // InformMetricsExporterToDeleteWatchedCHI informs exporter to delete/forget watched CHI
 func InformMetricsExporterToDeleteWatchedCHI(chi *metrics.WatchedCR) error {
-	return makeRESTCall(chi, "DELETE")
+	return makeRESTCall(&RESTRequest{Type: RequestTypeCR, CR: chi}, "DELETE")
+}
+
+// InformMetricsExporterAboutWatchedHost informs exporter about new watched host
+func InformMetricsExporterAboutWatchedHost(host *HostRequest) error {
+	return makeRESTCall(&RESTRequest{Type: RequestTypeHost, Host: host}, "POST")
+}
+
+// InformMetricsExporterToDeleteWatchedHost informs exporter to delete/forget watched host
+func InformMetricsExporterToDeleteWatchedHost(host *HostRequest) error {
+	return makeRESTCall(&RESTRequest{Type: RequestTypeHost, Host: host}, "DELETE")
 }
