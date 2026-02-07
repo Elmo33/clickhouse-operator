@@ -56,7 +56,7 @@ var _ prometheus.Collector = &Exporter{}
 // NewExporter returns a new instance of Exporter type
 func NewExporter(collectorTimeout time.Duration) *Exporter {
 	return &Exporter{
-		crInstallations:  make(map[string]*metrics.WatchedCR),
+		crInstallations:  newCRInstallationsIndex(),
 		collectorTimeout: collectorTimeout,
 	}
 }

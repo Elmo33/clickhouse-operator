@@ -18,6 +18,10 @@ import "github.com/altinity/clickhouse-operator/pkg/apis/metrics"
 
 type crInstallationsIndex map[string]*metrics.WatchedCR
 
+func newCRInstallationsIndex() crInstallationsIndex {
+	return make(map[string]*metrics.WatchedCR)
+}
+
 func (i crInstallationsIndex) slice() []*metrics.WatchedCR {
 	res := make([]*metrics.WatchedCR, 0)
 	for _, cr := range i {
