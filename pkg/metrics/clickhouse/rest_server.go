@@ -27,7 +27,33 @@ import (
 	"github.com/altinity/clickhouse-operator/pkg/apis/metrics"
 )
 
-// RESTServer provides HTTP API for managing watched CRs
+// Request type constants
+const (
+	RequestTypeCR   = "cr"
+	RequestTypeHost = "host"
+)
+
+// RESTRequest wraps different request types for POST/DELETE operations
+type RESTRequest struct {
+	Type string              `json:"type"` // "cr" or "host"
+	CR   *metrics.WatchedCR  `json:"cr,omitempty"`
+	Host *HostRequest        `json:"host,omitempty"`
+}
+
+// HostRequest contains host details with parent context
+type HostRequest struct {
+	CRNamespace string               `json:"crNamespace"`
+	CRName      string               `json:"crName"`
+	ClusterName string               `json:"clusterName"`
+	Host        *metrics.WatchedHost `json:"host"`
+}
+
+// IsValid checks if HostRequest has all required fields
+func (r *HostRequest) IsValid() bool {
+	return r.CRNamespace != "" && r.CRName != "" && r.ClusterName != "" && r.Host != nil && r.Host.Hostname != ""
+}
+
+// RESTServer provides HTTP API for managing watched CRs and Hosts
 type RESTServer struct {
 	registry *CRRegistry
 }
@@ -64,35 +90,68 @@ func (s *RESTServer) handleGet(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(s.registry.List())
 }
 
-// handlePost serves HTTP POST request to add CR to the list of watched CRs
+// handlePost serves HTTP POST request to add CR or Host
 func (s *RESTServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if cr, err := s.decodeCR(r); err == nil {
-		s.registry.Add(cr)
-	} else {
+	req, err := s.decodeRequest(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotAcceptable)
+		return
+	}
+
+	switch req.Type {
+	case RequestTypeCR:
+		s.registry.AddCR(req.CR)
+	case RequestTypeHost:
+		if err := s.registry.AddHost(req.Host); err != nil {
+			http.Error(w, err.Error(), http.StatusNotAcceptable)
+			return
+		}
+	default:
+		http.Error(w, fmt.Sprintf("unknown request type: %s", req.Type), http.StatusNotAcceptable)
 	}
 }
 
-// handleDelete serves HTTP DELETE request to delete CR from the list of watched CRs
+// handleDelete serves HTTP DELETE request to delete CR or Host
 func (s *RESTServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if cr, err := s.decodeCR(r); err == nil {
-		s.registry.EnqueueRemove(cr)
-	} else {
+	req, err := s.decodeRequest(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotAcceptable)
+		return
+	}
+
+	switch req.Type {
+	case RequestTypeCR:
+		s.registry.EnqueueRemoveCR(req.CR)
+	case RequestTypeHost:
+		s.registry.EnqueueRemoveHost(req.Host)
+	default:
+		http.Error(w, fmt.Sprintf("unknown request type: %s", req.Type), http.StatusNotAcceptable)
 	}
 }
 
-// decodeCR decodes CR from the HTTP request body
-func (s *RESTServer) decodeCR(r *http.Request) (*metrics.WatchedCR, error) {
-	cr := &metrics.WatchedCR{}
-	if err := json.NewDecoder(r.Body).Decode(cr); err == nil {
-		if cr.IsValid() {
-			return cr, nil
-		}
+// decodeRequest decodes RESTRequest from the HTTP request body
+func (s *RESTServer) decodeRequest(r *http.Request) (*RESTRequest, error) {
+	req := &RESTRequest{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		return nil, fmt.Errorf("unable to parse request: %w", err)
 	}
-	return nil, fmt.Errorf("unable to parse CR from request")
+
+	switch req.Type {
+	case RequestTypeCR:
+		if req.CR == nil || !req.CR.IsValid() {
+			return nil, fmt.Errorf("invalid CR in request")
+		}
+	case RequestTypeHost:
+		if req.Host == nil || !req.Host.IsValid() {
+			return nil, fmt.Errorf("invalid Host in request")
+		}
+	default:
+		return nil, fmt.Errorf("unknown request type: %s", req.Type)
+	}
+
+	return req, nil
 }
 
 // StartMetricsREST starts Prometheus metrics exporter and REST API server
