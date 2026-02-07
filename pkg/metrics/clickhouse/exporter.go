@@ -16,9 +16,6 @@ package clickhouse
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -42,34 +39,24 @@ import (
 // Exporter implements prometheus.Collector interface
 type Exporter struct {
 	collectorTimeout time.Duration
-
-	// crInstallations is an index of watched CRs
-	crInstallations crInstallationsIndex
-
-	mutex               sync.RWMutex
-	toRemoveFromWatched sync.Map
+	registry         *CRRegistry
 }
 
 // Type compatibility
 var _ prometheus.Collector = &Exporter{}
 
 // NewExporter returns a new instance of Exporter type
-func NewExporter(collectorTimeout time.Duration) *Exporter {
+func NewExporter(registry *CRRegistry, collectorTimeout time.Duration) *Exporter {
 	return &Exporter{
-		crInstallations:  newCRInstallationsIndex(),
+		registry:         registry,
 		collectorTimeout: collectorTimeout,
 	}
-}
-
-// getWatchedCHIs
-func (e *Exporter) getWatchedCHIs() []*metrics.WatchedCR {
-	return e.crInstallations.slice()
 }
 
 // Collect implements prometheus.Collector Collect method
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	// Run cleanup on each collect
-	e.cleanup()
+	e.registry.Cleanup()
 
 	if ch == nil {
 		log.Warning("Prometheus channel is closed. Unable to write metrics")
@@ -87,19 +74,15 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.collectorTimeout)
 	defer cancel()
 
-	// This method may be called concurrently and must therefore be implemented in a concurrency safe way
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
 	log.V(1).Infof("Launching host collectors [%s]", time.Since(start))
 
 	var wg = sync.WaitGroup{}
-	e.crInstallations.walk(func(chi *metrics.WatchedCR, _ *metrics.WatchedCluster, host *metrics.WatchedHost) {
+	e.registry.Walk(func(cr *metrics.WatchedCR, _ *metrics.WatchedCluster, host *metrics.WatchedHost) {
 		wg.Add(1)
-		go func(ctx context.Context, chi *metrics.WatchedCR, host *metrics.WatchedHost, ch chan<- prometheus.Metric) {
+		go func(ctx context.Context, cr *metrics.WatchedCR, host *metrics.WatchedHost, ch chan<- prometheus.Metric) {
 			defer wg.Done()
-			e.collectHostMetrics(ctx, chi, host, ch)
-		}(ctx, chi, host, ch)
+			e.collectHostMetrics(ctx, cr, host, ch)
+		}(ctx, cr, host, ch)
 	})
 	wg.Wait()
 }
@@ -109,44 +92,16 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	prometheus.DescribeByCollect(e, ch)
 }
 
-// enqueueToRemoveFromWatched
-func (e *Exporter) enqueueToRemoveFromWatched(chi *metrics.WatchedCR) {
-	e.toRemoveFromWatched.Store(chi, struct{}{})
+// collectHostMetrics collects metrics from one host and writes them into chan
+func (e *Exporter) collectHostMetrics(ctx context.Context, chi *metrics.WatchedCR, host *metrics.WatchedHost, c chan<- prometheus.Metric) {
+	collector := NewCollector(
+		e.newHostFetcher(host),
+		NewCHIPrometheusWriter(c, chi, host),
+	)
+	collector.CollectHostMetrics(ctx, host)
 }
 
-// cleanup cleans all pending for cleaning
-func (e *Exporter) cleanup() {
-	// Clean up all pending for cleaning CHIs
-	log.V(2).Info("Starting cleanup")
-	e.toRemoveFromWatched.Range(func(key, value interface{}) bool {
-		switch key.(type) {
-		case *metrics.WatchedCR:
-			e.toRemoveFromWatched.Delete(key)
-			e.removeFromWatched(key.(*metrics.WatchedCR))
-			log.V(1).Infof("Removed ClickHouseInstallation (%s/%s) from Exporter", key.(*metrics.WatchedCR).Name, key.(*metrics.WatchedCR).Namespace)
-		}
-		return true
-	})
-	log.V(2).Info("Completed cleanup")
-}
-
-// removeFromWatched deletes record from watched index
-func (e *Exporter) removeFromWatched(chi *metrics.WatchedCR) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-	log.V(1).Infof("Remove ClickHouseInstallation (%s/%s)", chi.Namespace, chi.Name)
-	e.crInstallations.remove(chi.IndexKey())
-}
-
-// updateWatched updates watched index
-func (e *Exporter) updateWatched(chi *metrics.WatchedCR) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-	log.V(1).Infof("Update ClickHouseInstallation (%s/%s): %s", chi.Namespace, chi.Name, chi)
-	e.crInstallations.set(chi.IndexKey(), chi)
-}
-
-// newFetcher returns new Metrics Fetcher for specified host
+// newHostFetcher returns new Metrics Fetcher for specified host
 func (e *Exporter) newHostFetcher(host *metrics.WatchedHost) *MetricsFetcher {
 	// Make base cluster connection params
 	clusterConnectionParams := clickhouse.NewClusterConnectionParamsFromCHOpConfig(chop.Config())
@@ -171,53 +126,6 @@ func (e *Exporter) newHostFetcher(host *metrics.WatchedHost) *MetricsFetcher {
 		clusterConnectionParams.NewEndpointConnectionParams(host.Hostname),
 		chop.Config().ClickHouse.Metrics.TablesRegexp,
 	)
-}
-
-// collectHostMetrics collects metrics from one host and writes them into chan
-func (e *Exporter) collectHostMetrics(ctx context.Context, chi *metrics.WatchedCR, host *metrics.WatchedHost, c chan<- prometheus.Metric) {
-	collector := NewCollector(
-		e.newHostFetcher(host),
-		NewCHIPrometheusWriter(c, chi, host),
-	)
-	collector.CollectHostMetrics(ctx, host)
-}
-
-// getWatchedCHI serves HTTP request to get list of watched CHIs
-func (e *Exporter) getWatchedCHI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(e.getWatchedCHIs())
-}
-
-// fetchCHI decodes chi from the request
-func (e *Exporter) fetchCHI(r *http.Request) (*metrics.WatchedCR, error) {
-	chi := &metrics.WatchedCR{}
-	if err := json.NewDecoder(r.Body).Decode(chi); err == nil {
-		if chi.IsValid() {
-			return chi, nil
-		}
-	}
-
-	return nil, fmt.Errorf("unable to parse CHI from request")
-}
-
-// updateWatchedCHI serves HTTP request to add CHI to the list of watched CHIs
-func (e *Exporter) updateWatchedCHI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if chi, err := e.fetchCHI(r); err == nil {
-		e.updateWatched(chi)
-	} else {
-		http.Error(w, err.Error(), http.StatusNotAcceptable)
-	}
-}
-
-// deleteWatchedCHI serves HTTP request to delete CHI from the list of watched CHIs
-func (e *Exporter) deleteWatchedCHI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if chi, err := e.fetchCHI(r); err == nil {
-		e.enqueueToRemoveFromWatched(chi)
-	} else {
-		http.Error(w, err.Error(), http.StatusNotAcceptable)
-	}
 }
 
 // DiscoveryWatchedCHIs discovers all ClickHouseInstallation objects available for monitoring and adds them to watched list
@@ -252,8 +160,8 @@ func (e *Exporter) processDiscoveredCR(kubeClient kube.Interface, chi *api.Click
 
 	normalized, _ := normalizer.CreateTemplated(chi, normalizerCommon.NewOptions[api.ClickHouseInstallation]())
 
-	watchedCHI := metrics.NewWatchedCR(normalized)
-	e.updateWatched(watchedCHI)
+	watchedCR := metrics.NewWatchedCR(normalized)
+	e.registry.Add(watchedCR)
 }
 
 func (e *Exporter) shouldWatchCR(chi *api.ClickHouseInstallation) bool {
