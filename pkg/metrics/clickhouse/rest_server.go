@@ -102,7 +102,7 @@ func StartMetricsREST(
 	collectorTimeout time.Duration,
 	chiListAddress string,
 	chiListPath string,
-) (*Exporter, *CRRegistry) {
+) *Exporter {
 	log.V(1).Infof("Starting metrics exporter at '%s%s'\n", metricsAddress, metricsPath)
 
 	// Create shared registry
@@ -125,5 +125,5 @@ func StartMetricsREST(
 		go http.ListenAndServe(chiListAddress, nil)
 	}
 
-	return exporter, registry
+	return exporter
 }
