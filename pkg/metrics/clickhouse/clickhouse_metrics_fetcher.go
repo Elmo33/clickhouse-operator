@@ -155,6 +155,7 @@ func NewMetricsFetcher(
 	}
 }
 
+// connection is a connection getter
 func (f *MetricsFetcher) connection() *clickhouse.Connection {
 	return clickhouse.GetPooledDBConnection(f.connectionParams)
 }
