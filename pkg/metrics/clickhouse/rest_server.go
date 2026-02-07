@@ -123,9 +123,9 @@ func (s *RESTServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Type {
 	case RequestTypeCR:
-		s.registry.EnqueueRemoveCR(req.CR)
+		s.registry.RemoveCR(req.CR)
 	case RequestTypeHost:
-		s.registry.EnqueueRemoveHost(req.Host)
+		s.registry.RemoveHost(req.Host)
 	default:
 		http.Error(w, fmt.Sprintf("unknown request type: %s", req.Type), http.StatusNotAcceptable)
 	}
