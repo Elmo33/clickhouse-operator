@@ -25,21 +25,33 @@ func (w *worker) excludeFromMonitoring(cr *api.ClickHouseInstallation) {
 	// Exclude from monitoring STOP-ped CR
 	// Running CR is not touched
 
-	if !cr.IsStopped() {
+	if cr.IsStopped() {
+		// CR is stopped
+		// Exclude it from monitoring cause it makes no sense to send SQL requests to stopped instances
+
+		w.a.V(1).
+			WithEvent(cr, a.EventActionReconcile, a.EventReasonReconcileInProgress).
+			WithAction(cr).
+			M(cr).F().
+			Info("exclude CR from monitoring")
+		w.c.deleteWatch(cr)
+	} else {
 		// CR is NOT stopped, it is running
-		// No need to exclude running CR
-		return
+		// Ensure CR is registered in monitoring
+		w.a.V(1).
+			WithEvent(cr, a.EventActionReconcile, a.EventReasonReconcileInProgress).
+			WithAction(cr).
+			M(cr).F().
+			Info("ensure CR in monitoring")
+
+		if cr.HasAncestor() {
+			// Ensure CR is watched
+			w.c.updateWatch(cr.GetAncestorT())
+		} else {
+			// CR is a new one - allocate monitoring
+			w.c.allocateWatch(cr)
+		}
 	}
-
-	// CR is stopped
-	// Exclude it from monitoring cause it makes no sense to send SQL requests to stopped instances
-
-	w.a.V(1).
-		WithEvent(cr, a.EventActionReconcile, a.EventReasonReconcileInProgress).
-		WithAction(cr).
-		M(cr).F().
-		Info("exclude CR from monitoring")
-	w.c.deleteWatch(cr)
 }
 
 // addToMonitoring adds CR to monitoring
