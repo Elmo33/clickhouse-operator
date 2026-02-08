@@ -740,6 +740,9 @@ func (w *worker) reconcileHost(ctx context.Context, host *api.Host) error {
 		},
 	})
 
+	// Host reconcile completed successfully - add it to monitoring
+	w.addHostToMonitoring(host)
+
 	metrics.HostReconcilesCompleted(ctx, host.GetCR())
 	metrics.HostReconcilesTimings(ctx, host.GetCR(), time.Since(startTime).Seconds())
 
