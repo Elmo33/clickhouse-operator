@@ -692,6 +692,13 @@ func (c *Controller) updateWatch(chi *api.ClickHouseInstallation) {
 	go c.updateWatchAsync(watched)
 }
 
+// allocateWatch
+func (c *Controller) allocateWatch(chi *api.ClickHouseInstallation) {
+	watched := metrics.NewWatchedCR(chi)
+	watched.Clusters = nil
+	go c.updateWatchAsync(watched)
+}
+
 // updateWatchAsync
 func (c *Controller) updateWatchAsync(chi *metrics.WatchedCR) {
 	if err := clickhouse.InformMetricsExporterAboutWatchedCHI(chi); err != nil {
