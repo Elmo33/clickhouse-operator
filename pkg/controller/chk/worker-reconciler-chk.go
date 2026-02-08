@@ -80,7 +80,7 @@ func (w *worker) reconcileCR(ctx context.Context, old, new *apiChk.ClickHouseKee
 	}
 
 	w.markReconcileStart(ctx, new)
-	w.excludeFromMonitoring(new)
+	w.prepareMonitoring(new)
 	w.setHostStatusesPreliminary(ctx, new)
 
 	if err := w.reconcile(ctx, new); err != nil {

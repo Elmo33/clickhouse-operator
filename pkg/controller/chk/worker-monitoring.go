@@ -18,8 +18,8 @@ import (
 	api "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse-keeper.altinity.com/v1"
 )
 
-// excludeFromMonitoring excludes stopped CR from monitoring
-func (w *worker) excludeFromMonitoring(cr *api.ClickHouseKeeperInstallation) {
+// prepareMonitoring prepares monitoring state before reconcile begins
+func (w *worker) prepareMonitoring(cr *api.ClickHouseKeeperInstallation) {
 }
 
 // addToMonitoring adds CR to monitoring
