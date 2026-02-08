@@ -19,11 +19,11 @@ import (
 	a "github.com/altinity/clickhouse-operator/pkg/controller/common/announcer"
 )
 
-// excludeFromMonitoring excludes stopped CR from monitoring
-func (w *worker) excludeFromMonitoring(cr *api.ClickHouseInstallation) {
-	// Important
-	// Exclude from monitoring STOP-ped CR
-	// Running CR is not touched
+// prepareMonitoring prepares monitoring state before reconcile begins.
+// For stopped CR - excludes from monitoring.
+// For running CR with ancestor - preserves old topology in monitoring.
+// For new running CR - allocates an empty slot in monitoring index.
+func (w *worker) prepareMonitoring(cr *api.ClickHouseInstallation) {
 
 	if cr.IsStopped() {
 		// CR is stopped
