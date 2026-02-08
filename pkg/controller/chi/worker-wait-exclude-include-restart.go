@@ -325,6 +325,9 @@ func (w *worker) catchReplicationLag(ctx context.Context, host *api.Host) error 
 			"Host/shard/cluster: %d/%d/%s",
 			host.Runtime.Address.ReplicaIndex, host.Runtime.Address.ShardIndex, host.Runtime.Address.ClusterName)
 
+	// Host is alive but catching up - add to monitoring so metrics are collected during the wait
+	w.addHostToMonitoring(host)
+
 	err := w.waitHostHasNoReplicationDelay(ctx, host)
 	if err == nil {
 		w.a.V(1).
