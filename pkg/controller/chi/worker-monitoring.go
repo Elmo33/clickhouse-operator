@@ -63,6 +63,3 @@ func (w *worker) addToMonitoring(cr *api.ClickHouseInstallation) {
 		Info("add CR to monitoring")
 	w.c.updateWatch(cr)
 }
-
-
-
