@@ -22,7 +22,7 @@ import (
 // excludeFromMonitoring excludes stopped CR from monitoring
 func (w *worker) excludeFromMonitoring(cr *api.ClickHouseInstallation) {
 	// Important
-	// Exclude from monitoring STOPpe CR
+	// Exclude from monitoring STOP-ped CR
 	// Running CR is not touched
 
 	if !cr.IsStopped() {
@@ -33,6 +33,7 @@ func (w *worker) excludeFromMonitoring(cr *api.ClickHouseInstallation) {
 
 	// CR is stopped
 	// Exclude it from monitoring cause it makes no sense to send SQL requests to stopped instances
+
 	w.a.V(1).
 		WithEvent(cr, a.EventActionReconcile, a.EventReasonReconcileInProgress).
 		WithAction(cr).
@@ -43,10 +44,17 @@ func (w *worker) excludeFromMonitoring(cr *api.ClickHouseInstallation) {
 
 // addToMonitoring adds CR to monitoring
 func (w *worker) addToMonitoring(cr *api.ClickHouseInstallation) {
+	// Important
+	// Include into monitoring RUN-ning CR
+	// Stopped CR is not touched
+
 	if cr.IsStopped() {
 		// No need to add stopped CR
 		return
 	}
+
+	// CR is running
+	// Include it into monitoring
 
 	w.a.V(1).
 		WithEvent(cr, a.EventActionReconcile, a.EventReasonReconcileInProgress).
@@ -55,3 +63,6 @@ func (w *worker) addToMonitoring(cr *api.ClickHouseInstallation) {
 		Info("add CR to monitoring")
 	w.c.updateWatch(cr)
 }
+
+
+
