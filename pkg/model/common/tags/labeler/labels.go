@@ -105,15 +105,17 @@ func (l *Labeler) _labelExistingPV(pv *core.PersistentVolume, host *api.Host) ma
 
 func (l *Labeler) labelNewPVC(params ...any) map[string]string {
 	var host *api.Host
-	if len(params) > 0 {
+	var template *api.VolumeClaimTemplate
+	if len(params) > 1 {
 		host = params[0].(*api.Host)
-		return l._labelNewPVC(host)
+		template = params[1].(*api.VolumeClaimTemplate)
+		return l._labelNewPVC(host, template)
 	}
 	panic("not enough params for labeler")
 }
 
-func (l *Labeler) _labelNewPVC(host *api.Host) map[string]string {
-	return l.GetHostScope(host, false)
+func (l *Labeler) _labelNewPVC(host *api.Host, template *api.VolumeClaimTemplate) map[string]string {
+	return l.getHostScopeReclaimPolicy(host, template, false)
 }
 
 func (l *Labeler) labelExistingPVC(params ...any) map[string]string {
