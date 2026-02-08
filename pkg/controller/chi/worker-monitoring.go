@@ -19,6 +19,17 @@ import (
 	a "github.com/altinity/clickhouse-operator/pkg/controller/common/announcer"
 )
 
+// addHostToMonitoring adds a single host to monitoring.
+// Used during reconcile to enable monitoring for individual hosts as they become ready.
+func (w *worker) addHostToMonitoring(host *api.Host) {
+	if host.GetCR().IsStopped() {
+		return
+	}
+
+	w.a.V(1).M(host).F().Info("add host to monitoring: %s", host.Runtime.Address.FQDN)
+	w.c.addHostWatch(host)
+}
+
 // prepareMonitoring prepares monitoring state before reconcile begins.
 // For stopped CR - excludes from monitoring.
 // For running CR with ancestor - preserves old topology in monitoring.
