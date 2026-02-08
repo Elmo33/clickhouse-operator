@@ -708,6 +708,33 @@ func (c *Controller) updateWatchAsync(chi *metrics.WatchedCR) {
 	}
 }
 
+// addHostWatch adds a single host to monitoring
+func (c *Controller) addHostWatch(host *api.Host) {
+	req := &clickhouse.HostRequest{
+		CRNamespace: host.Runtime.Address.Namespace,
+		CRName:      host.Runtime.Address.CHIName,
+		ClusterName: host.Runtime.Address.ClusterName,
+		Host: &metrics.WatchedHost{
+			Name:      host.Name,
+			Hostname:  host.Runtime.Address.FQDN,
+			TCPPort:   host.TCPPort.Value(),
+			TLSPort:   host.TLSPort.Value(),
+			HTTPPort:  host.HTTPPort.Value(),
+			HTTPSPort: host.HTTPSPort.Value(),
+		},
+	}
+	go c.addHostWatchAsync(req)
+}
+
+// addHostWatchAsync
+func (c *Controller) addHostWatchAsync(req *clickhouse.HostRequest) {
+	if err := clickhouse.InformMetricsExporterAboutWatchedHost(req); err != nil {
+		log.V(1).F().Info("FAIL add host watch (%s/%s/%s/%s): %q", req.CRNamespace, req.CRName, req.ClusterName, req.Host.Hostname, err)
+	} else {
+		log.V(1).Info("OK add host watch (%s/%s/%s/%s)", req.CRNamespace, req.CRName, req.ClusterName, req.Host.Hostname)
+	}
+}
+
 // deleteWatch
 func (c *Controller) deleteWatch(chi *api.ClickHouseInstallation) {
 	watched := metrics.NewWatchedCR(chi)
