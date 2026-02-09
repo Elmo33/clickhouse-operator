@@ -22,6 +22,7 @@ import (
 	api "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse.altinity.com/v1"
 	"github.com/altinity/clickhouse-operator/pkg/apis/common/types"
 	"github.com/altinity/clickhouse-operator/pkg/chop"
+	a "github.com/altinity/clickhouse-operator/pkg/controller/common/announcer"
 	"github.com/altinity/clickhouse-operator/pkg/controller/common/poller"
 	"github.com/altinity/clickhouse-operator/pkg/controller/common/poller/domain"
 	"github.com/altinity/clickhouse-operator/pkg/interfaces"
@@ -321,6 +322,7 @@ func (w *worker) catchReplicationLag(ctx context.Context, host *api.Host) error 
 
 	w.a.V(1).
 		M(host).F().
+		WithEvent(host.GetCR(), a.EventActionReconcile, a.EventReasonReconcileInProgress).
 		Info("Wait for host to catch replication lag - START "+
 			"Host/shard/cluster: %d/%d/%s",
 			host.Runtime.Address.ReplicaIndex, host.Runtime.Address.ShardIndex, host.Runtime.Address.ClusterName)
@@ -332,6 +334,7 @@ func (w *worker) catchReplicationLag(ctx context.Context, host *api.Host) error 
 	if err == nil {
 		w.a.V(1).
 			M(host).F().
+			WithEvent(host.GetCR(), a.EventActionReconcile, a.EventReasonReconcileCompleted).
 			Info("Wait for host to catch replication lag - COMPLETED "+
 				"Host/shard/cluster: %d/%d/%s",
 				host.Runtime.Address.ReplicaIndex, host.Runtime.Address.ShardIndex, host.Runtime.Address.ClusterName,
@@ -341,6 +344,7 @@ func (w *worker) catchReplicationLag(ctx context.Context, host *api.Host) error 
 	} else {
 		w.a.V(1).
 			M(host).F().
+			WithEvent(host.GetCR(), a.EventActionReconcile, a.EventReasonReconcileFailed).
 			Info("Wait for host to catch replication lag - FAILED "+
 				"Host/shard/cluster: %d/%d/%s"+
 				"err: %v ",
