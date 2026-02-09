@@ -14,11 +14,11 @@ spec:
         containers:
         - name: clickhouse-pod
           image: clickhouse/clickhouse-server:24.3
-    - name: v24.8
+    - name: v0-25.8.16.10001.altinitytest
       spec:
         containers:
         - name: clickhouse-pod
-          image: clickhouse/clickhouse-server:24.8
+          image: altinityinfra/clickhouse-server:0-25.8.16.10001.altinitytest
   configuration:
     clusters:
     - name: default
@@ -27,7 +27,7 @@ spec:
          - templates:
              podTemplate: v24.3
          - templates:
-             podTemplate: v24.8
+             podTemplate: v0-25.8.16.10001.altinitytest
     files:
       users.d/remove_database_ordinary.xml: |
         <yandex>
