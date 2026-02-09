@@ -5970,11 +5970,11 @@ def test(self):
 
     # define values for Operator upgrade test (test_009)
 
-    with Pool(3) as pool:
-        for scenario in loads(current_module(), Scenario, Suite):
-            if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
-                Scenario(run=scenario, parallel=True, executor=pool)
-        join()
+    # with Pool(3) as pool:
+    #     for scenario in loads(current_module(), Scenario, Suite):
+    #         if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
+    #             Scenario(run=scenario, parallel=True, executor=pool)
+    #     join()
 
     for scenario in loads(current_module(), Scenario, Suite):
         if hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags):
