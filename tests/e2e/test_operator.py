@@ -155,7 +155,7 @@ def test_010006(self):
     create_shell_namespace_clickhouse_template()
 
     old_version = "clickhouse/clickhouse-server:24.8"
-    new_version = "altinityinfra/clickhouse-server:0-25.8.16.10001.altinitytest"
+    new_version = "altinityinfra/clickhouse-server:1403-25.8.16.10001.altinitytest-alpine"
     chi = "test-006"
 
     with Then(f"Start CHI with version {old_version}"):
@@ -4955,7 +4955,7 @@ def test_010054(self):
     chi = yaml_manifest.get_name(util.get_full_path("manifests/chi/test-006-ch-upgrade-1.yaml"))
 
     old_version = "clickhouse/clickhouse-server:24.8"
-    new_version = "altinityinfra/clickhouse-server:0-25.8.16.10001.altinitytest"
+    new_version = "altinityinfra/clickhouse-server:1403-25.8.16.10001.altinitytest-alpine"
     with Then(f"Start CHI with version {old_version}"):
         kubectl.create_and_check(
             manifest="manifests/chi/test-006-ch-upgrade-1.yaml",
