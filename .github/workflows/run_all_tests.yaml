@@ -1,0 +1,36 @@
+name: run_all_tests
+on:
+  pull_request:
+    branches:
+      - '*'
+  workflow_dispatch:
+jobs:
+  part1:
+    name: Tests Part 1
+    uses: ./.github/workflows/run_tests.yaml
+    with:
+      test_part: part1
+
+  part2:
+    name: Tests Part 2
+    uses: ./.github/workflows/run_tests.yaml
+    with:
+      test_part: part2
+
+  part3:
+    name: Tests Part 3
+    uses: ./.github/workflows/run_tests.yaml
+    with:
+      test_part: part3
+
+  part4:
+    name: Tests Part 4
+    uses: ./.github/workflows/run_tests.yaml
+    with:
+      test_part: part4
+
+  no_parallel:
+    name: Tests No Parallel
+    uses: ./.github/workflows/run_tests.yaml
+    with:
+      test_part: no_parallel

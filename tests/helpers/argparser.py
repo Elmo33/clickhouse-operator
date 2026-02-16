@@ -13,3 +13,10 @@ def argparser(parser):
         choices=["zookeeper", "clickhouse-keeper"],
         default="zookeeper",
     )
+    parser.add_argument(
+        "--test-part",
+        type=str,
+        help="test part to run (part1, part2, part3, part4, no_parallel)",
+        choices=["part1", "part2", "part3", "part4", "no_parallel"],
+        default="no_parallel",
+    )

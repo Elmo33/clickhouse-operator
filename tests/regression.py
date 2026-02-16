@@ -41,7 +41,7 @@ xfails = {
 @XFails(xfails)
 @ArgumentParser(argparser)
 @Specifications(QA_SRS026_ClickHouse_Operator)
-def regression(self, native, keeper_type):
+def regression(self, native, keeper_type, test_part):
     """ClickHouse Operator test regression suite."""
 
     def run_features():
@@ -59,6 +59,7 @@ def regression(self, native, keeper_type):
 
     self.context.native = native
     self.context.keeper_type = keeper_type
+    self.context.test_part = test_part
 
     if native:
         run_features()
