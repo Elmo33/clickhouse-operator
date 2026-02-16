@@ -127,14 +127,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: testflows-report
-          path: |
-            tests/*.html
-          if-no-files-found: error
-          retention-days: 90
-
       - name: Test Failed
         if: ${{ steps.run-tests.outputs.test_result != '0' }}
         uses: actions/github-script@v3
