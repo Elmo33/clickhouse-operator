@@ -5990,7 +5990,7 @@ def test(self):
 
     # define values for Operator upgrade test (test_009)
 
-    selected_part = "part3"
+    selected_part = "part1"
 
     with Given("scenarios split into parts"):
         parts, no_parallel = split_operator_scenarios()
