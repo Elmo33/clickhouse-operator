@@ -64,7 +64,7 @@ spec:
         spec:
           containers:
             - name: clickhouse-pod
-              image: altinityinfra/clickhouse-server:0-25.8.16.10001.altinitytest
+              image: altinityinfra/clickhouse-server:1403-25.8.16.10001.altinitytest-alpine
               ports:
                 - name: http
                   containerPort: 8123
