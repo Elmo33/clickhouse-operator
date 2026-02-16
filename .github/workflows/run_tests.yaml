@@ -88,7 +88,7 @@ jobs:
 
           sudo ln -snvf ~/venv/qa/bin/tfs /bin/tfs
 
-          ~/venv/qa/bin/python3 ./tests/regression.py --test-part="${TEST_PART}" --only=/regression/e2e.test_operator/* --test-to-end --trim-results on --no-colors --native --log ./tests/raw.log --output "nice-new-fails"
+          ~/venv/qa/bin/python3 ./tests/regression.py --test-part="${TEST_PART}" --only=/regression/e2e.test_operator/* --test-to-end --trim-results on --no-colors --native --log ./tests/raw.log --output "new-fails"
           test_result=$?
           ~/venv/qa/bin/tfs --no-colors transform compact ./tests/raw.log ./tests/compact.log
           ~/venv/qa/bin/tfs --no-colors transform nice ./tests/raw.log ./tests/nice.log.txt
