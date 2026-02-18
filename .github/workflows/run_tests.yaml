@@ -1,19 +1,38 @@
 name: run_tests
 on:
-  workflow_call:
+  pull_request:
+    branches:
+      - '*'
+  workflow_dispatch:
     inputs:
       test_part:
-        description: 'Test part to run (part1, part2, part3, part4, no_parallel)'
-        type: string
-        required: true
+        description: 'Test part to run'
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - part1
+          - part2
+          - part3
+          - part4
+          - no_parallel
 jobs:
-  run_tests:
-    name: Run Tests (${{ inputs.test_part }})
+  run-tests:
+    name: Tests (${{ matrix.test_part }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test_part: ${{ fromJSON(
+          github.event_name == 'pull_request' && '["part1","part2","part3","part4","no_parallel"]'
+          || inputs.test_part == 'all' && '["part1","part2","part3","part4","no_parallel"]'
+          || format('["{0}"]', inputs.test_part)
+          ) }}
     env:
-      TEST_PART: ${{ inputs.test_part }}
+      TEST_PART: ${{ matrix.test_part }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Cache python
         uses: actions/cache@v4
         id: cache-python
@@ -22,12 +41,11 @@ jobs:
           key: python-${{ hashFiles('tests/image/requirements.txt') }}
 
       - name: Install python dependencies
+        if: steps.cache-python.outputs.cache-hit != 'true'
         run: |
           set -x
           python3 -m venv ~/venv/qa
           ~/venv/qa/bin/pip3 install -U -r ./tests/image/requirements.txt
-        if: |
-          steps.cache-python.outputs.cache-hit != 'true'
 
       - name: Setup required Ubuntu packages
         run: |
@@ -79,12 +97,12 @@ jobs:
         continue-on-error: true
         run: |
           echo "Test run settings:"
-          echo "  test part: ${{ inputs.test_part }}"
+          echo "  test part: ${{ matrix.test_part }}"
           echo
 
           source ~/venv/qa/bin/activate
           set -x
-          set +e # disable the "exit on failure"
+          set +e
 
           sudo ln -snvf ~/venv/qa/bin/tfs /bin/tfs
 
@@ -100,7 +118,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: testflows-logs-${{ inputs.test_part }}
+          name: testflows-logs-${{ matrix.test_part }}
           path: |
             tests/*.log
             tests/*.log.txt
