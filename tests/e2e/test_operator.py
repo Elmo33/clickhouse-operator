@@ -5934,12 +5934,31 @@ def cleanup_chis(self):
                     with Then(f"Delete ns {ns_name}"):
                         util.delete_namespace(namespace = ns_name, delete_chi=True)
 
+@TestStep(Given)
+def split_operator_scenarios(self):
+    """Split operator scenarios into 4 parts for parallel execution and a separate part for NO_PARALLEL scenarios."""
 
-@TestModule
+    all_scenarios = list(loads(current_module(), Scenario, Suite))
+    no_parallel = [s for s in all_scenarios if hasattr(s, "tags") and ("NO_PARALLEL" in s.tags)]
+    parallel = [s for s in all_scenarios if s not in no_parallel]
+
+    number_of_scenarios = len(parallel)
+    part_size = (number_of_scenarios + 3) // 4
+    parts = {
+        "part1": parallel[:part_size],
+        "part2": parallel[part_size:part_size * 2],
+        "part3": parallel[part_size * 2:part_size * 3],
+        "part4": parallel[part_size * 3:],
+    }
+    return parts, no_parallel
+
+@TestFeature
 @Name("e2e.test_operator")
 @Requirements(RQ_SRS_026_ClickHouseOperator_CustomResource_APIVersion("1.0"),
               RQ_SRS_026_ClickHouseOperator("1.0"))
 def test(self):
+    """Test ClickHouse Operator"""
+
     with Given("set settings"):
         set_settings()
 
@@ -5959,12 +5978,20 @@ def test(self):
 
     # define values for Operator upgrade test (test_009)
 
-    with Pool(3) as pool:
-        for scenario in loads(current_module(), Scenario, Suite):
-            if not (hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags)):
-                Scenario(run=scenario, parallel=True, executor=pool)
-        join()
+    selected_part = self.context.test_part
 
-    for scenario in loads(current_module(), Scenario, Suite):
-        if hasattr(scenario, "tags") and ("NO_PARALLEL" in scenario.tags):
+    with Given("scenarios split into parts"):
+        parts, no_parallel = split_operator_scenarios()
+
+    if selected_part == "no_parallel":
+        for scenario in no_parallel:
             Scenario(run=scenario)
+        return
+
+    scenarios = parts.get(selected_part, [])
+    if not scenarios:
+        return
+    with Pool(3) as pool:
+        for scenario in scenarios:
+            Scenario(run=scenario, parallel=True, executor=pool)
+        join()
