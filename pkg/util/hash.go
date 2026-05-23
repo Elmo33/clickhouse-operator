@@ -16,10 +16,13 @@ package util
 
 import (
 	"bytes"
-	// #nosec G505 — non-security deterministic ID hashing; see HashIntoString
-	// doc-comment. The operator's FIPS scope specification (§3) explicitly
-	// excludes this site from the FIPS cryptographic boundary.
-	"crypto/sha1"
+	// SHA-256 is FIPS-approved and works under GODEBUG=fips140=only.
+	// This site is a non-cryptographic deterministic ID hash; the algorithm
+	// was migrated from SHA-1 to SHA-256 (truncated to 20 bytes for K8s
+	// label-value width compatibility) so the operator can run under strict
+	// FIPS mode without panicking. See pkg/util/fips/gate.go and
+	// docs/security_hardening.md §3.
+	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
@@ -49,20 +52,20 @@ func serializeRepeatable(obj interface{}) []byte {
 // HashIntoString returns a deterministic 40-char hex digest used as a
 // non-cryptographic object fingerprint / K8s label value (see Fingerprint and
 // labeler.MakeObjectVersion). NOT a security control: the digest is only used
-// to compare two serialized object representations for equality. Documented as
-// outside the FIPS cryptographic boundary per the operator's FIPS scope (no
-// integrity, signing, or authentication use). The Go runtime's `fips140=on`
-// (default for GOFIPS140-built binaries) permits SHA-1 in non-approved paths;
-// `fips140=only` (opt-in strict mode) would forbid it — operators running the
-// optional strict-mode image variant must take that into account.
+// to compare two serialized object representations for equality. The 40-char
+// width is part of the contract — K8s label values must be ≤63 chars and the
+// `clickhouse.altinity.com/object-version` label is compared verbatim across
+// reconciles, so any change to width or algorithm forces a one-time STS roll
+// on operator upgrade as every existing object's label value re-hashes.
+//
+// SHA-256 (truncated to 20 bytes / 40 hex chars) is used so the operator
+// works under GODEBUG=fips140=only — SHA-1 panics in strict mode.
 func HashIntoString(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	// #nosec G401 — non-security deterministic ID hashing.
-	hasher := sha1.New()
-	hasher.Write(b)
-	return hex.EncodeToString(hasher.Sum(nil))
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:20])
 }
 
 // HashIntoInt hashes bytes and returns int version of the hash

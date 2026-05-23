@@ -18,7 +18,9 @@ python3 "${COMMON_DIR}/../regression.py" \
     --only="/regression/e2e.test_operator/${ONLY}" \
     ${RUN_ALL_FLAG} \
     "${RETRY_ARGS[@]}" \
-    -o short \
+    -o fails \
     --trim-results on \
     --debug \
-    --native
+    --native \
+    --pause-on-fail "*" \
+    --test-to-end

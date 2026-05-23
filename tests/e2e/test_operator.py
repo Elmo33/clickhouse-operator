@@ -167,7 +167,7 @@ def test_010006(self):
     create_shell_namespace_clickhouse_template()
 
     old_version = "clickhouse/clickhouse-server:24.8"
-    new_version = "clickhouse/clickhouse-server:25.3"
+    new_version = "altinity/clickhouse-server:25.3.8.30001.altinityfips"
     chi = "test-006"
 
     with Then(f"Start CHI with version {old_version}"):
@@ -5418,7 +5418,7 @@ def test_010054(self):
     chi = yaml_manifest.get_name(util.get_full_path("manifests/chi/test-006-ch-upgrade-1.yaml"))
 
     old_version = "clickhouse/clickhouse-server:24.8"
-    new_version = "clickhouse/clickhouse-server:25.3"
+    new_version = "altinity/clickhouse-server:25.3.8.30001.altinityfips"
     with Then(f"Start CHI with version {old_version}"):
         kubectl.create_and_check(
             manifest="manifests/chi/test-006-ch-upgrade-1.yaml",
@@ -7419,7 +7419,7 @@ def test_020003(self):
 
     cluster = "default"
     keeper_version_from = "25.3"
-    keeper_version_to = "25.8"
+    keeper_version_to = "25.3.8.30001.altinityfips"
 
     with Given("CHK with 3 replicas"):
         kubectl.create_and_check(
@@ -7458,9 +7458,9 @@ def test_020003(self):
         )
 
     with Then(f"I check clickhouse-keeper version is changed to {keeper_version_to}"):
-        kubectl.wait_field('pod', 'chk-test-020003-chk-keeper-0-0-0', '.spec.containers[0].image', f'clickhouse/clickhouse-keeper:{keeper_version_to}', retries=1)
-        kubectl.wait_field('pod', 'chk-test-020003-chk-keeper-0-1-0', '.spec.containers[0].image', f'clickhouse/clickhouse-keeper:{keeper_version_to}', retries=1)
-        kubectl.wait_field('pod', 'chk-test-020003-chk-keeper-0-2-0', '.spec.containers[0].image', f'clickhouse/clickhouse-keeper:{keeper_version_to}', retries=1)
+        kubectl.wait_field('pod', 'chk-test-020003-chk-keeper-0-0-0', '.spec.containers[0].image', f'altinity/clickhouse-keeper:{keeper_version_to}', retries=1)
+        kubectl.wait_field('pod', 'chk-test-020003-chk-keeper-0-1-0', '.spec.containers[0].image', f'altinity/clickhouse-keeper:{keeper_version_to}', retries=1)
+        kubectl.wait_field('pod', 'chk-test-020003-chk-keeper-0-2-0', '.spec.containers[0].image', f'altinity/clickhouse-keeper:{keeper_version_to}', retries=1)
 
     with And("Wait for ClickHouse to connect to Keeper properly"):
         for attempt in retries(timeout=180, delay=5):

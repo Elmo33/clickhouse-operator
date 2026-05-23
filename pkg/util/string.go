@@ -15,10 +15,10 @@
 package util
 
 import (
-	// #nosec G505 — non-security deterministic ID hashing; see CreateStringID
-	// doc-comment. The operator's FIPS scope specification (§3) explicitly
-	// excludes this site from the FIPS cryptographic boundary.
-	"crypto/sha1"
+	// SHA-256 is FIPS-approved and works under GODEBUG=fips140=only.
+	// This site is a non-cryptographic deterministic identifier; SHA-1
+	// was replaced so the operator can run under strict FIPS mode.
+	"crypto/sha256"
 	"encoding/hex"
 	"math/rand"
 	"time"
@@ -46,14 +46,13 @@ func RandStringRange(minLength, maxLength int) string {
 }
 
 // CreateStringID creates a HEX hash ID out of a string. Non-cryptographic
-// deterministic identifier; outside the FIPS cryptographic boundary per the
-// operator's FIPS scope.
+// deterministic identifier. Returns up to 40 hex chars (matches the legacy
+// SHA-1 width so callers passing maxHashLen >= 40 see identical behavior).
 // In case maxHashLen == 0 the whole hash is returned.
 func CreateStringID(str string, maxHashLen int) string {
-	// #nosec G401 — non-security deterministic ID hashing.
-	sha := sha1.New()
-	sha.Write([]byte(str))
-	hash := hex.EncodeToString(sha.Sum(nil))
+	sum := sha256.Sum256([]byte(str))
+	// Truncate to 20 bytes = 40 hex chars to preserve the legacy width.
+	hash := hex.EncodeToString(sum[:20])
 
 	if maxHashLen == 0 {
 		// Explicitly requested to return everything

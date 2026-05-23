@@ -26,12 +26,12 @@ spec:
         spec:
           containers:
             - name: clickhouse-pod
-              image: altinity/clickhouse-server:25.8.16.10001.altinitystable
+              image: altinity/clickhouse-server:25.3.8.30001.altinityfips
       - name: slow-replica
         spec:
           containers:
             - name: clickhouse-pod
-              image: altinity/clickhouse-server:25.8.16.10001.altinitystable
+              image: altinity/clickhouse-server:25.3.8.30001.altinityfips
               command:
                 - "/bin/bash"
                 - "-c"

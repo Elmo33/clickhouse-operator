@@ -17,4 +17,4 @@ spec:
         spec:
           containers:
             - name: clickhouse-keeper
-              image: "clickhouse/clickhouse-keeper:25.8"
+              image: "altinity/clickhouse-keeper:25.3.8.30001.altinityfips"
