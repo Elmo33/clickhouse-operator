@@ -97,14 +97,12 @@
     * 8.6 [Operator Prometheus Metrics](#operator-prometheus-metrics)
         * 8.6.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Gap.OperatorMetricsTLS](#rqsrs026clickhouseoperatorfipsgapoperatormetricstls)
 * 9 [Exporter External Connections](#exporter-external-connections)
-    * 9.1 [Exporter Runtime Listener Verification](#exporter-runtime-listener-verification)
-        * 9.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.Listeners](#rqsrs026clickhouseoperatorfipsconnectexporterlisteners)
-    * 9.2 [Exporter to Kubernetes API](#exporter-to-kubernetes-api)
-        * 9.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.Kubernetes](#rqsrs026clickhouseoperatorfipsconnectexporterkubernetes)
-    * 9.3 [Exporter to ClickHouse Server](#exporter-to-clickhouse-server)
-        * 9.3.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse](#rqsrs026clickhouseoperatorfipsconnectexporterclickhouse)
-    * 9.4 [Exporter Prometheus Metrics](#exporter-prometheus-metrics)
-        * 9.4.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Gap.ExporterMetricsTLS](#rqsrs026clickhouseoperatorfipsgapexportermetricstls)
+    * 9.1 [Exporter to Kubernetes API](#exporter-to-kubernetes-api)
+        * 9.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.Kubernetes](#rqsrs026clickhouseoperatorfipsconnectexporterkubernetes)
+    * 9.2 [Exporter to ClickHouse Server](#exporter-to-clickhouse-server)
+        * 9.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse](#rqsrs026clickhouseoperatorfipsconnectexporterclickhouse)
+    * 9.3 [Exporter Prometheus Metrics](#exporter-prometheus-metrics)
+        * 9.3.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Gap.ExporterMetricsTLS](#rqsrs026clickhouseoperatorfipsgapexportermetricstls)
 * 10 [Integrity Check Failure](#integrity-check-failure)
     * 10.1 [Operator Integrity Tampering](#operator-integrity-tampering)
         * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.OperatorMismatch](#rqsrs026clickhouseoperatorfipsintegrityoperatormismatch)
@@ -578,7 +576,10 @@ E2e coverage: [`test_020011`](../e2e/test_operator_fips.py#L200).
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Listeners
 version: 1.0
 
-FIPS workload pods (ClickHouse, Keeper, and sidecar containers) SHALL listen only on expected TLS ports. Plaintext service ports (8123, 9000, 2181) SHALL NOT be open when FIPS transport hardening applies.
+FIPS workload pods (ClickHouse, Keeper, and sidecar containers) SHALL listen only on expected TLS ports. 
+Plaintext service ports (8123, 9000, 2181) SHALL NOT be open when FIPS transport hardening applies. 
+The clickhouse-operator pod network namespace SHALL expose only the expected Prometheus listener ports: `:8888` for 
+metrics-exporter and `:9999` for clickhouse-operator, because both containers share the same pod network namespace.
 
 
 ### Operator to Kubernetes API
@@ -624,17 +625,6 @@ Operator Prometheus metrics on :9999 currently expose a known FIPS gap (HTTP-onl
 ## Exporter External Connections
 
 **Objective:** Verify all **metrics-exporter** inbound and outbound connections use FIPS-compliant TLS.
-
-
-### Exporter Runtime Listener Verification
-
-Listener audits use the same `/proc/net/tcp` technique as [Operator Runtime Listener Verification](#operator-runtime-listener-verification). E2e audits the **clickhouse-backup** sidecar in [`test_020011`](../e2e/test_operator_fips.py#L200). The **metrics-exporter** process on `:8888` remains a known gap until metrics TLS is implemented.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.Listeners
-version: 1.0
-
-The metrics-exporter process SHALL expose only expected listener ports on `:8888`. Sidecar containers in the same pod SHALL be listener-audited with the same `/proc/net/tcp` procedure.
-
 
 ### Exporter to Kubernetes API
 

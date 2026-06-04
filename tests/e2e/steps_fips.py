@@ -773,13 +773,14 @@ def fips_assert_only_tls_ports(
     pod,
     required,
     container="clickhouse",
+    ns=None,
     max_iters=1,
     sleep_s=2,
 ):
     """Assert the container listens on exactly ``required`` and nothing else."""
     ports = set()
     for attempt in range(max_iters):
-        ports = fips_read_listening_ports(pod=pod, container=container)
+        ports = fips_read_listening_ports(pod=pod, container=container, ns=ns)
         note(f"listening ports on {pod}: {sorted(ports)}")
 
         missing = required - ports
@@ -804,6 +805,38 @@ def fips_assert_only_tls_ports(
     assert not unexpected, error(
         f"{pod}: unexpected {container} ports listening "
         f"(approved={sorted(required)}): {sorted(unexpected)}"
+    )
+
+
+@TestStep(Then)
+def fips_assert_operator_pod_listener_ports(self):
+    """Assert the operator pod namespace exposes only expected listener ports."""
+
+    ns = current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+
+    raw = kubectl.launch(
+        f"debug {pod} "
+        f"--image=busybox:1.36 "
+        f"--target=clickhouse-operator "
+        f"--attach "
+        f"-- sh -c 'cat /proc/1/net/tcp /proc/1/net/tcp6'",
+        ns=ns,
+    )
+
+    ports = set()
+    for line in raw.splitlines():
+        cols = line.split()
+        if len(cols) < 4 or cols[0] == "sl" or cols[3] != "0A":
+            continue
+        try:
+            ports.add(int(cols[1].split(":")[1], 16))
+        except (IndexError, ValueError):
+            continue
+
+    expected = {8888, 9999}
+    assert ports == expected, error(
+        f"operator pod expected only ports {sorted(expected)}, got {sorted(ports)}"
     )
 
 
