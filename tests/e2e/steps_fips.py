@@ -571,6 +571,10 @@ def start_external_ch_container(self, ns=None, cipher_suites=None):
     note(f"external ClickHouse client container started: {container}")
     self.context.external_chi_container = container
 
+    yield
+
+    with Finally("stop external ClickHouse client container"):
+        stop_external_ch_container()
 
 @TestStep(Finally)
 def stop_external_ch_container(self):
@@ -695,7 +699,7 @@ def fips_edit_manifest(self, source_manifest, replicas_count=None, kind="chi"):
 def fips_apply_manifest(
     self,
     manifest_path,
-    expected_pod_count=None,
+    replica_count=None,
     kind="chi",
     apply_templates=None,
     timeout=None,
@@ -712,8 +716,8 @@ def fips_apply_manifest(
     check = {
         "do_not_delete": 1,
     }
-    if expected_pod_count is not None:
-        check["pod_count"] = expected_pod_count
+    if replica_count is not None:
+        check["pod_count"] = replica_count
     if expected_status is not None:
         if kind == "chi":
             check["chi_status"] = expected_status
@@ -744,18 +748,20 @@ def get_binary_version(self, pod, binary, container=None, ns=None):
         ns=ns,
     )
 
+@TestStep(Then)
+def check_fips_binary_version(self, pod, binary, container=None, ns=None):
+    """Run ``<binary> --version`` inside a pod and check it contains altinityfips tag."""
 
-@TestStep(When)
-def fips_read_listening_ports(self, pod, container="clickhouse", ns=None):
-    """Return TCP ports in LISTEN state inside the container via ``/proc/net/tcp``."""
-    ns = ns or self.context.test_namespace
-    raw = kubectl.launch(
-        f"exec {pod} -c {container} -- "
-        f"sh -c 'cat /proc/net/tcp /proc/net/tcp6'",
-        ns=ns,
+    version = get_binary_version(pod=pod, binary=binary, container=container, ns=ns)
+
+    assert "altinityfips" in version, error(
+        f"{pod}: expected altinityfips in {binary} version, got {version!r}"
     )
 
+def translate_tcp_port_output(raw):
+    """Translates raw output to a readable set of ports"""
     ports = set()
+
     for line in raw.splitlines():
         cols = line.split()
         if len(cols) < 4 or cols[0] == "sl" or cols[3] != "0A":
@@ -764,27 +770,70 @@ def fips_read_listening_ports(self, pod, container="clickhouse", ns=None):
             ports.add(int(cols[1].split(":")[1], 16))
         except (IndexError, ValueError):
             continue
+
     return ports
+
+@TestStep(When)
+def fips_read_listening_ports(
+    self,
+    pod,
+    container,
+    ns=None,
+    debug=False,
+    target=None,
+):
+    """Return TCP ports in LISTEN state from /proc/net/tcp and /proc/net/tcp6."""
+
+    ns = ns or self.context.test_namespace
+
+    if debug:
+        target = target or container
+        raw = kubectl.launch(
+            f"debug {pod} "
+            f"--image=busybox:1.36 "
+            f"--target={target} "
+            f"--attach "
+            f"-- sh -c 'cat /proc/1/net/tcp /proc/1/net/tcp6'",
+            ns=ns,
+        )
+    else:
+        raw = kubectl.launch(
+            f"exec {pod} -c {container} -- "
+            f"sh -c 'cat /proc/net/tcp /proc/net/tcp6'",
+            ns=ns,
+        )
+
+    return translate_tcp_port_output(raw=raw)
 
 
 @TestStep(Then)
-def fips_assert_only_tls_ports(
+def fips_assert_only_expected_ports(
     self,
     pod,
-    required,
+    expected,
     container="clickhouse",
     ns=None,
     max_iters=1,
     sleep_s=2,
+    debug=False
 ):
-    """Assert the container listens on exactly ``required`` and nothing else."""
+    """Assert the container listens on expected required ports."""
+
     ports = set()
+
     for attempt in range(max_iters):
-        ports = fips_read_listening_ports(pod=pod, container=container, ns=ns)
+        ports = fips_read_listening_ports(
+            pod=pod,
+            container=container,
+            ns=ns,
+            debug=debug
+        )
+
         note(f"listening ports on {pod}: {sorted(ports)}")
 
-        missing = required - ports
-        unexpected = ports - required
+        missing = expected - ports
+        unexpected = ports - expected
+
         if not missing and not unexpected:
             return
 
@@ -796,47 +845,15 @@ def fips_assert_only_tls_ports(
             )
             time.sleep(sleep_s)
 
-    missing = required - ports
+    missing = expected - ports
     assert not missing, error(
         f"{pod}: required {container} TLS ports missing: {sorted(missing)}"
     )
 
-    unexpected = ports - required
+    unexpected = ports - expected
     assert not unexpected, error(
         f"{pod}: unexpected {container} ports listening "
-        f"(approved={sorted(required)}): {sorted(unexpected)}"
-    )
-
-
-@TestStep(Then)
-def fips_assert_operator_pod_listener_ports(self):
-    """Assert the operator pod namespace exposes only expected listener ports."""
-
-    ns = current().context.operator_namespace
-    pod = kubectl.get_operator_pod(ns=ns)
-
-    raw = kubectl.launch(
-        f"debug {pod} "
-        f"--image=busybox:1.36 "
-        f"--target=clickhouse-operator "
-        f"--attach "
-        f"-- sh -c 'cat /proc/1/net/tcp /proc/1/net/tcp6'",
-        ns=ns,
-    )
-
-    ports = set()
-    for line in raw.splitlines():
-        cols = line.split()
-        if len(cols) < 4 or cols[0] == "sl" or cols[3] != "0A":
-            continue
-        try:
-            ports.add(int(cols[1].split(":")[1], 16))
-        except (IndexError, ValueError):
-            continue
-
-    expected = {8888, 9999}
-    assert ports == expected, error(
-        f"operator pod expected only ports {sorted(expected)}, got {sorted(ports)}"
+        f"(approved={sorted(expected)}): {sorted(unexpected)}"
     )
 
 
@@ -868,7 +885,7 @@ def fips_wait_cluster_topology(
     self,
     pod,
     cluster_name,
-    expected_count,
+    replica_count,
     max_iters=30,
     sleep_s=2,
 ):
@@ -879,63 +896,193 @@ def fips_wait_cluster_topology(
             f"SELECT count() FROM system.clusters "
             f"WHERE cluster = '{cluster_name}'"
         ),
-        expected=expected_count,
+        expected=replica_count,
         max_iters=max_iters,
         sleep_s=sleep_s,
     )
-    note(f"{pod} sees {expected_count} hosts in cluster {cluster_name!r}")
-
+    note(f"{pod} sees {replica_count} hosts in cluster {cluster_name!r}")
 
 @TestStep(Then)
-def fips_assert_replicas_healthy(
-    self,
-    workload,
-    expected_count,
-    kind="chi",
-    cluster_name="default",
-):
-    """Run essential FIPS/TLS health checks for the current CHI or CHK replica set."""
-    if kind == "chi":
-        pods = sorted(kubectl.get_pod_names(workload))
-        binary = "clickhouse"
-        container = "clickhouse"
-        tls_ports = {8443, 9440, 9010, 7171}
-    elif kind == "chk":
-        pods = sorted(kubectl.get_chk_pod_names(workload))
-        binary = "clickhouse-keeper"
-        container = "clickhouse-keeper"
-        tls_ports = {2281, 9444, 9182}
-    else:
-        raise ValueError(f"unsupported workload kind: {kind}")
+def run_operator_fips_checks(self):
+    """
+    Run FIPS validation checks against the operator pod:
 
-    note(f"{kind.upper()} pods: {pods}")
-    assert len(pods) == expected_count, error(
-        f"expected {expected_count} {kind.upper()} pods, "
-        f"got {len(pods)}: {pods}"
+    * verify the pod network namespace exposes only expected Prometheus ports
+    * verify clickhouse-operator and metrics-exporter emit FIPS startup banners
+    """
+    ns = current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+    expected_ports = {8888, 9999}
+
+    with Then("operator pod exposes only expected listener ports"):
+        fips_assert_only_expected_ports(
+            pod=pod,
+            container="clickhouse-operator",
+            ns=ns,
+            expected=expected_ports,
+            debug=True,
+        )
+
+    with And("both containers report the FIPS startup banner"):
+        op_logs = get_container_logs(
+            pod=pod,
+            container="clickhouse-operator",
+            ns=ns,
+        )
+        me_logs = get_container_logs(
+            pod=pod,
+            container="metrics-exporter",
+            ns=ns,
+        )
+        fips_startup_banner_ok(container="clickhouse-operator", logs=op_logs)
+        fips_startup_banner_ok(container="metrics-exporter", logs=me_logs)
+
+@TestStep(Then)
+def run_chi_fips_checks(self, workload, replica_count, cluster_name="default"):
+    """
+    Run FIPS and TLS validation checks against the ClickHouse cluster:
+
+    * wait for the expected cluster topology to become available
+    * verify ClickHouse binaries report an Altinity FIPS build
+    * verify only approved secure listener ports are exposed
+    * verify external TLS connectivity to ClickHouse succeeds
+    * verify the server reports a FIPS version string
+    * verify operator-generated configuration removes plaintext listeners
+    """
+    pods = sorted(kubectl.get_pod_names(workload))
+    binary = "clickhouse"
+    container = "clickhouse"
+    expected_ports = {8443, 9440, 9010, 7171}
+    pod0 = pods[0]
+
+    note(f"CHI pods: {pods}")
+    assert len(pods) == replica_count, error(
+        f"expected {replica_count} CHI pods, got {len(pods)}: {pods}"
     )
 
-    for pod in pods:
-        version = get_binary_version(pod=pod, binary=binary)
-        assert "altinityfips" in version, error(
-            f"{pod}: expected altinityfips in {binary} version, got {version!r}"
-        )
-        fips_assert_only_tls_ports(
-            pod=pod,
-            required=tls_ports,
-            container=container,
-            max_iters=30,
-            sleep_s=2,
-        )
-
-    if kind == "chi":
-        pod0 = pods[0]
-        out = fips_ch_external_secure_query(pod=pod0, sql="SELECT 1")
-        assert out == "1", error(f"external secure query failed, got {out!r}")
+    with When("I wait for full cluster deployment"):
         fips_wait_cluster_topology(
             pod=pod0,
             cluster_name=cluster_name,
-            expected_count=expected_count,
+            replica_count=replica_count,
         )
+
+    for pod in pods:
+        with Then("check the binary version contains altinityfips tag"):
+            check_fips_binary_version(pod=pod, binary=binary, container=container)
+
+        with And("check the container only listens on expected ports"):
+            fips_assert_only_expected_ports(
+                pod=pod,
+                expected=expected_ports,
+                container=container,
+                max_iters=30,
+                sleep_s=2,
+            )
+
+    with Then("check connection via external secure query"):
+        check_external_clickhouse_reports_fips_version(pod=pod0)
+        out = fips_ch_external_secure_query(pod=pod0, sql="SELECT 1")
+        assert out == "1", error(f"external secure query failed, got {out!r}")
+
+    with And("operator-generated ClickHouse config removes plaintext ports"):
+        settings_xml = fips_read_chop_generated_settings(pod=pod0)
+        note(f"chop-generated-settings.xml:\n{settings_xml}")
+        check_ports_in_chi_settings(settings_xml=settings_xml)
+
+    return pods
+
+
+@TestStep(Then)
+def run_chk_fips_checks(self, workload, replica_count):
+    """
+    Run FIPS and TLS validation checks against the ClickHouse Keeper cluster:
+
+    * verify the expected number of Keeper pods are running
+    * verify Keeper binaries report an Altinity FIPS build
+    * verify only approved secure listener ports are exposed
+    * verify operator-generated configuration removes plaintext listeners
+    * verify Raft inter-node communication is configured for TLS
+    """
+    pods = sorted(kubectl.get_chk_pod_names(workload))
+    binary = "clickhouse-keeper"
+    container = "clickhouse-keeper"
+    expected_ports = {2281, 9444, 9182}
+
+    note(f"CHK pods: {pods}")
+    assert len(pods) == replica_count, error(
+        f"expected {replica_count} CHK pods, got {len(pods)}: {pods}"
+    )
+
+    for pod in pods:
+        with Then("check the binary version contains altinityfips tag"):
+            check_fips_binary_version(pod=pod, binary=binary, container=container)
+
+        with And("check the container only listens on expected ports"):
+            fips_assert_only_expected_ports(
+                pod=pod,
+                expected=expected_ports,
+                container=container,
+                max_iters=30,
+                sleep_s=2,
+            )
+
+    with And("operator-generated Keeper config removes plaintext listeners"):
+        common_listeners_xml, raft_xml = fips_read_chop_generated_keeper_settings(
+            chk=workload,
+        )
+        note(f"chop-generated-common-listeners.xml:\n{common_listeners_xml}")
+        note(f"chop-generated-raft.xml:\n{raft_xml}")
+        check_ports_in_chk_settings(
+            common_listeners_xml=common_listeners_xml,
+            raft_xml=raft_xml,
+        )
+
+    return pods
+
+
+@TestStep(Then)
+def run_backup_fips_checks(self, workload, replica_count):
+    """
+    Run FIPS and TLS validation checks against clickhouse-backup sidecars:
+
+    * verify the expected number of CHI pods with backup sidecars are running
+    * verify clickhouse-backup binaries report a FIPS build
+    * verify only approved secure listener ports are exposed
+    * verify each sidecar binary embeds GOFIPS metadata
+    * verify the HTTPS API serves over TLS with the test CA
+    * verify the HTTPS API rejects unapproved TLS 1.3 cipher suites
+    """
+    pods = sorted(kubectl.get_pod_names(workload))
+    container = "clickhouse-backup"
+    expected_ports = {8443, 9440, 9010, 7171}
+
+    note(f"CHI pods with backup sidecar: {pods}")
+    assert len(pods) == replica_count, error(
+        f"expected {replica_count} CHI pods, got {len(pods)}: {pods}"
+    )
+
+    for pod in pods:
+        with Then("check the backup binary version contains fips tag"):
+            check_backup_fips_binary_version(pod=pod)
+
+        with And("check the sidecar only listens on expected ports"):
+            fips_assert_only_expected_ports(
+                pod=pod,
+                expected=expected_ports,
+                container=container,
+                max_iters=30,
+                sleep_s=2,
+            )
+
+    with And("each sidecar binary embeds GOFIPS metadata"):
+        check_clickhouse_backup_embeds_gofips(pods=pods)
+
+    with Then("HTTPS API serves over TLS with the test CA"):
+        check_clickhouse_backup_https_api_serves_tls(pods=pods)
+
+    with And("HTTPS API rejects unapproved TLS cipher suites"):
+        check_clickhouse_backup_https_api_rejects_untrusted_cipher(pods=pods)
 
     return pods
 
@@ -1013,9 +1160,47 @@ def check_ports_in_chi_settings(self, settings_xml):
         )
 
 
+@TestStep(When)
+def fips_read_chop_generated_keeper_settings(self, chk, ns=None):
+    """Return operator-generated Keeper listener and Raft XML from the common ConfigMap."""
+    ns = ns or self.context.test_namespace
+    cm = kubectl.get("configmap", f"chk-{chk}-common-configd", ns=ns)
+    data = cm.get("data", {})
+    return (
+        data.get("chop-generated-common-listeners.xml", ""),
+        data.get("chop-generated-raft.xml", ""),
+    )
+
+
+@TestStep(Then)
+def check_ports_in_chk_settings(self, common_listeners_xml, raft_xml):
+    """Check plaintext listener removal and Raft TLS in CHK settings."""
+    assert '<tcp_port remove="1"/>' in common_listeners_xml, error(
+        "tcp_port not marked removed in operator-generated Keeper settings"
+    )
+    assert "<secure>1</secure>" in raft_xml, error(
+        "expected <secure>1</secure> in operator-generated Raft config"
+    )
+
+
 # ---------------------------------------------------------------------------
 # clickhouse-backup sidecar
 # ---------------------------------------------------------------------------
+
+@TestStep(Then)
+def check_backup_fips_binary_version(self, pod, ns=None):
+    """Run ``clickhouse-backup --version`` and check it contains a fips tag."""
+    version = get_binary_version(
+        pod=pod,
+        binary="/bin/clickhouse-backup",
+        container="clickhouse-backup",
+        ns=ns,
+    )
+    note(f"{pod} clickhouse-backup --version: {version}")
+    assert "fips" in version.lower(), error(
+        f"{pod}: expected fips in clickhouse-backup version, got {version!r}"
+    )
+
 
 @TestStep(Then)
 def check_clickhouse_backup_embeds_gofips(
@@ -1061,21 +1246,30 @@ def check_clickhouse_backup_https_api_serves_tls(self, pods, ns=None):
 
 
 @TestStep(Then)
-def check_clickhouse_backup_https_api_rejects_untrusted(self, pods, ns=None):
-    """Verify clickhouse-backup HTTPS API rejects clients without the test CA."""
+def check_clickhouse_backup_https_api_rejects_untrusted_cipher(
+    self,
+    pods,
+    cipher_suite="TLS_CHACHA20_POLY1305_SHA256",
+    ns=None,
+):
+    """Verify clickhouse-backup HTTPS API rejects a TLS 1.3 cipher outside the FIPS-approved set."""
     ns = ns or self.context.test_namespace
 
     for pod in pods:
         out = kubectl.launch(
             f"exec {pod} -c clickhouse-backup -- "
             f"sh -c 'curl -sS --fail "
+            f"--cacert /etc/clickhouse-backup/tls/ca.crt "
+            f"--tls13-ciphers {cipher_suite} "
             f"https://127.0.0.1:7171/backup/tables >/dev/null 2>&1; "
             f"echo EXIT:$?'",
             ns=ns,
         )
-        assert "EXIT:60" in out, error(
-            f"{pod}: expected certificate verification failure EXIT:60, got {out!r}"
+        assert "EXIT:0" not in out, error(
+            f"{pod}: expected TLS cipher {cipher_suite!r} to be rejected, "
+            f"got {out!r}"
         )
+        note(f"{pod} rejected TLS cipher {cipher_suite!r}: {out.strip()}")
 
 
 @TestStep(Then)

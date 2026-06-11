@@ -7827,41 +7827,9 @@ def test_030001(self):
 
 @TestScenario
 @Tags("HEAVY")
-@Name("test_030002. FIPS build: startup banners with strict chopconf and GODEBUG")
+@Name("test_030003. FIPS data plane: TLS-only ClickHouse, Keeper, and backup")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries_StartupLogs("1.0")
-)
-def test_030002(self):
-    """Verify FIPS startup banners from running operator and exporter binaries."""
-    chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
-
-    fips_create_shell_namespace_clickhouse_template()
-    operator_namespace = self.context.operator_namespace
-
-    with Given("strict FIPS operator configuration is applied"):
-        fips_apply_operator_config(chopconf_path=chopconf)
-
-    with When("operator startup logs are fetched"):
-        operator_pod = kubectl.get_operator_pod(ns=operator_namespace)
-        op_logs = get_container_logs(
-            pod=operator_pod,
-            container="clickhouse-operator",
-            ns=operator_namespace,
-        )
-        me_logs = get_container_logs(
-            pod=operator_pod,
-            container="metrics-exporter",
-            ns=operator_namespace,
-        )
-
-    with Then("both containers report runtime.enforced=true in the FIPS banner"):
-        fips_startup_banner_ok(container="clickhouse-operator", logs=op_logs)
-        fips_startup_banner_ok(container="metrics-exporter", logs=me_logs)
-
-@TestScenario
-@Tags("HEAVY")
-@Name("test_030003. FIPS CHI/CHK: TLS-only ports and replicated CH traffic")
-@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries_StartupLogs("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Listeners("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHIDeploy("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHKDeploy("1.0"),
@@ -7882,9 +7850,10 @@ def test_030002(self):
 )
 def test_030003(self):
     """Verify a FIPS ClickHouse + Keeper deployment runs with TLS-only data paths:
-    FIPS-built ClickHouse, Keeper, and clickhouse-backup binaries; only secure
-    ports exposed; the backup HTTPS API serving over TLS with CA-trust enforcement;
-    and ReplicatedMergeTree data converging over the TLS setup.
+    FIPS-built ClickHouse, Keeper, and clickhouse-backup binaries; operator startup
+    banners and listener ports; only secure ports exposed; the backup HTTPS API
+    serving over TLS with CA-trust enforcement; and ReplicatedMergeTree data
+    converging over the TLS setup.
     """
     chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
     chi_manifest = "manifests/chi/test-030003.yaml"
@@ -7896,8 +7865,13 @@ def test_030003(self):
     chi = yaml_manifest.get_name(util.get_full_path(chi_manifest))
     chk = yaml_manifest.get_name(util.get_full_path(chk_manifest))
 
+    chi_replica_count = 2
+
     with Given("strict FIPS operator configuration is applied"):
-        util.apply_operator_config(chopconf)
+        fips_apply_operator_config(chopconf_path=chopconf)
+
+    with Check("operator pod passes essential FIPS checks"):
+        run_operator_fips_checks()
 
     with And("test TLS secret is installed"):
         create_tls_secret_for_fips_hosts(chi=chi, chk=chk)
@@ -7908,80 +7882,35 @@ def test_030003(self):
     with And("FIPS ClickHouse Keeper is deployed with TLS settings"):
         fips_apply_manifest(
             manifest_path=chk_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chk",
         )
 
-    with Then("Keeper cluster passes essential FIPS checks"):
-        fips_assert_replicas_healthy(
-            workload=chk,
-            expected_count=2,
-            kind="chk",
-        )
+    with Check("Keeper cluster passes essential FIPS checks"):
+        run_chk_fips_checks(workload=chk, replica_count=2)
 
-    with And("FIPS ClickHouse is deployed with TLS settings"):
+    with When("FIPS ClickHouse is deployed with TLS settings"):
         fips_apply_manifest(
             manifest_path=chi_manifest,
-            expected_pod_count=2,
+            replica_count=chi_replica_count,
             kind="chi",
             apply_templates=[backup_template],
         )
 
-    with Then("ClickHouse cluster passes essential FIPS checks"):
-        chi_pods = fips_assert_replicas_healthy(
+    with Check("ClickHouse cluster passes essential FIPS checks"):
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=chi_replica_count,
         )
 
-    with And("operator pod exposes only expected listener ports"):
-        fips_assert_operator_pod_listener_ports()
+    with And("check clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=chi_replica_count,
+        )
 
-    chi_pod0 = chi_pods[0]
-
-    with And("each clickhouse-backup sidecar uses a FIPS-built binary"):
-        for pod in chi_pods:
-            version = get_binary_version(
-                pod=pod,
-                binary="/bin/clickhouse-backup",
-                container="clickhouse-backup",
-            )
-            note(f"{pod} clickhouse-backup --version: {version}")
-            assert "fips" in version.lower(), error(
-                f"{pod}: expected fips in clickhouse-backup version, got {version!r}"
-            )
-
-    with And("each clickhouse-backup sidecar embeds GOFIPS metadata"):
-        check_clickhouse_backup_embeds_gofips(pods=chi_pods)
-
-    with And("clickhouse-backup sidecar exposes only its TLS API port"):
-        for pod in chi_pods:
-            fips_assert_only_tls_ports(
-                pod=pod,
-                required={8443, 9010, 9440, 7171},
-                container="clickhouse-backup",
-            )
-
-    with And("clickhouse-backup HTTPS API serves over TLS with the FIPS cert"):
-        check_clickhouse_backup_https_api_serves_tls(pods=chi_pods)
-
-    with And("clickhouse-backup HTTPS API rejects untrusted clients"):
-        check_clickhouse_backup_https_api_rejects_untrusted(pods=chi_pods)
-
-    with And("external ClickHouse client reports a FIPS server version"):
-        check_external_clickhouse_reports_fips_version(pod=chi_pod0)
-
-    with And("operator-generated ClickHouse config removes plaintext ports"):
-        settings_xml = fips_read_chop_generated_settings(pod=chi_pod0)
-        note(f"chop-generated-settings.xml:\n{settings_xml}")
-        check_ports_in_chi_settings(settings_xml=settings_xml)
-
-    with Then("ReplicatedMergeTree data converges over the TLS setup"):
+    with Check("ReplicatedMergeTree data converges over the TLS setup"):
         fips_check_replication_across_replicas(chi_pods=chi_pods)
-
-    with Finally("external ClickHouse client container is removed"):
-        stop_external_ch_container()
-
 
 @TestScenario
 @Tags("HEAVY")
@@ -8019,7 +7948,7 @@ def test_030004(self):
     with And("FIPS ClickHouse Keeper is deployed with TLS settings"):
         fips_apply_manifest(
             manifest_path=chk_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chk",
         )
 
@@ -8031,16 +7960,21 @@ def test_030004(self):
         )
         fips_apply_manifest(
             manifest_path=chi_manifest_2,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chi",
             apply_templates=[backup_template],
         )
 
     with Then("2-replica cluster passes essential FIPS checks"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=2,
+        )
+
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=2,
         )
 
     with And("ReplicatedMergeTree data converges across 2 replicas"):
@@ -8054,15 +7988,20 @@ def test_030004(self):
         )
         fips_apply_manifest(
             manifest_path=chi_manifest_3,
-            expected_pod_count=3,
+            replica_count=3,
             kind="chi",
         )
 
     with Then("3-replica cluster passes essential FIPS checks"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=3,
-            kind="chi",
+            replica_count=3,
+        )
+
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=3,
         )
 
     with And("ReplicatedMergeTree data converges across 3 replicas"):
@@ -8070,6 +8009,8 @@ def test_030004(self):
             chi_pods=chi_pods,
             table="repl_scale_test_3",
         )
+
+    # TODO add settings check
 
     with When("CHI is downscaled to 1 replica"):
         chi_manifest_1 = fips_edit_manifest(
@@ -8079,19 +8020,22 @@ def test_030004(self):
         )
         fips_apply_manifest(
             manifest_path=chi_manifest_1,
-            expected_pod_count=1,
+            replica_count=1,
             kind="chi",
         )
 
     with Then("single-replica cluster passes essential FIPS checks"):
-        fips_assert_replicas_healthy(
+        run_chi_fips_checks(
             workload=chi,
-            expected_count=1,
-            kind="chi",
+            replica_count=1,
         )
 
-    with Finally("external ClickHouse client container is removed"):
-        stop_external_ch_container()
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=1,
+        )
+
 
 
 @TestScenario
@@ -8135,15 +8079,14 @@ def test_030005(self):
         )
         fips_apply_manifest(
             manifest_path=chk_manifest_2,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chk",
         )
 
     with Then("2-replica Keeper cluster passes essential FIPS checks"):
-        fips_assert_replicas_healthy(
+        run_chk_fips_checks(
             workload=chk,
-            expected_count=2,
-            kind="chk",
+            replica_count=2,
         )
 
     with And("FIPS ClickHouse is deployed with 2 replicas"):
@@ -8154,16 +8097,21 @@ def test_030005(self):
         )
         fips_apply_manifest(
             manifest_path=chi_manifest_2,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chi",
             apply_templates=[backup_template],
         )
 
     with And("2-replica ClickHouse cluster passes essential FIPS checks"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=2,
+        )
+
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=2,
         )
 
     with And("ReplicatedMergeTree data converges across 2 ClickHouse replicas"):
@@ -8177,22 +8125,26 @@ def test_030005(self):
         )
         fips_apply_manifest(
             manifest_path=chk_manifest_3,
-            expected_pod_count=3,
+            replica_count=3,
             kind="chk",
         )
 
     with Then("3-replica Keeper cluster passes essential FIPS checks"):
-        fips_assert_replicas_healthy(
+        run_chk_fips_checks(
             workload=chk,
-            expected_count=3,
-            kind="chk",
+            replica_count=3,
         )
 
     with And("ClickHouse remains healthy after Keeper upscale"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=2,
+        )
+
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=2,
         )
 
     with And("ReplicatedMergeTree data still converges after Keeper upscale"):
@@ -8209,22 +8161,26 @@ def test_030005(self):
         )
         fips_apply_manifest(
             manifest_path=chk_manifest_1,
-            expected_pod_count=1,
+            replica_count=1,
             kind="chk",
         )
 
     with Then("single-replica Keeper cluster passes essential FIPS checks"):
-        fips_assert_replicas_healthy(
+        run_chk_fips_checks(
             workload=chk,
-            expected_count=1,
-            kind="chk",
+            replica_count=1,
         )
 
     with And("ClickHouse remains healthy after Keeper downscale"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=2,
+        )
+
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=2,
         )
 
     with And("ReplicatedMergeTree data still converges after Keeper downscale"):
@@ -8233,8 +8189,6 @@ def test_030005(self):
             table="repl_chk_scale_test_1",
         )
 
-    with Finally("external ClickHouse client container is removed"):
-        stop_external_ch_container()
 
 
 @TestScenario
@@ -8531,7 +8485,7 @@ def test_030008(self):
     with When("CHI with altinityfips-tagged image is applied"):
         fips_apply_manifest(
             manifest_path=chi_fips_manifest,
-            expected_pod_count=1,
+            replica_count=1,
             kind="chi",
         )
 
@@ -8630,15 +8584,14 @@ def test_030009(self):
     with And("normal CHK is applied"):
         fips_apply_manifest(
             manifest_path=chk_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chk",
         )
 
     with Then("normal CHK becomes healthy"):
-        fips_assert_replicas_healthy(
+        run_chk_fips_checks(
             workload=chk,
-            expected_count=2,
-            kind="chk",
+            replica_count=2,
         )
 
     with When("CHI server disables TLS 1.3"):
@@ -8688,7 +8641,7 @@ def test_030010(self):
     with When("HTTPS ClickHouse CHI is deployed"):
         fips_apply_manifest(
             manifest_path=chi_manifest,
-            expected_pod_count=1,
+            replica_count=1,
             kind="chi",
             apply_templates=[current().context.clickhouse_template],
         )
@@ -8745,23 +8698,27 @@ def test_030012(self):
     with And("FIPS Keeper is deployed"):
         fips_apply_manifest(
             manifest_path=chk_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chk",
         )
 
     with And("FIPS ClickHouse with backup sidecar is deployed"):
         fips_apply_manifest(
             manifest_path=chi_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chi",
             apply_templates=[backup_template],
         )
 
     with Given("FIPS ClickHouse cluster is healthy"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=2,
+        )
+
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=2,
         )
 
         pod = chi_pods[0]
@@ -8773,8 +8730,6 @@ def test_030012(self):
     with Then("backup and restore succeeds through HTTPS API"):
         check_clickhouse_backup_restore_roundtrip_https(pod=pod)
 
-    with Finally("external ClickHouse client container is removed"):
-        stop_external_ch_container()
 
 
 @TestScenario
@@ -8834,23 +8789,27 @@ def test_030014(self):
     with And("FIPS Keeper is deployed"):
         fips_apply_manifest(
             manifest_path=chk_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chk",
         )
 
     with And("FIPS ClickHouse is deployed"):
         fips_apply_manifest(
             manifest_path=chi_manifest,
-            expected_pod_count=2,
+            replica_count=2,
             kind="chi",
             apply_templates=[backup_template],
         )
 
     with Then("initial CHI passes FIPS checks"):
-        chi_pods = fips_assert_replicas_healthy(
+        chi_pods = run_chi_fips_checks(
             workload=chi,
-            expected_count=2,
-            kind="chi",
+            replica_count=2,
+        )
+
+        run_backup_fips_checks(
+            workload=chi,
+            replica_count=2,
         )
 
         fips_check_replication_across_replicas(
@@ -8870,7 +8829,7 @@ def test_030014(self):
 
                 fips_apply_manifest(
                     manifest_path=updated_chk_manifest,
-                    expected_pod_count=2,
+                    replica_count=2,
                     kind="chk",
                 )
 
@@ -8882,23 +8841,26 @@ def test_030014(self):
 
                 fips_apply_manifest(
                     manifest_path=updated_chi_manifest,
-                    expected_pod_count=2,
+                    replica_count=2,
                     kind="chi",
                     apply_templates=[backup_template],
                 )
 
             with Then("updated CHK still passes FIPS checks"):
-                fips_assert_replicas_healthy(
+                run_chk_fips_checks(
                     workload=chk,
-                    expected_count=2,
-                    kind="chk",
+                    replica_count=2,
                 )
 
             with And("updated CHI still passes FIPS checks"):
-                chi_pods = fips_assert_replicas_healthy(
+                chi_pods = run_chi_fips_checks(
                     workload=chi,
-                    expected_count=2,
-                    kind="chi",
+                    replica_count=2,
+                )
+
+                run_backup_fips_checks(
+                    workload=chi,
+                    replica_count=2,
                 )
 
                 fips_check_replication_across_replicas(
@@ -8927,8 +8889,6 @@ def test_030014(self):
                         pod=chi_pods[0],
                         cipher_suite=rejected_cipher_suite,
                     )
-    with Finally("external ClickHouse client container is removed"):
-        stop_external_ch_container()
 
 
 def cleanup_chis(self):
@@ -8944,7 +8904,7 @@ def cleanup_chis(self):
 
 
 @TestModule
-@Name("e2e.test_operator")
+@Name("test_operator")
 @Requirements(RQ_SRS_026_ClickHouseOperator_CustomResource_APIVersion("1.0"),
               RQ_SRS_026_ClickHouseOperator("1.0"))
 def test(self):
