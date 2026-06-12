@@ -1,6 +1,6 @@
 # These requirements were auto generated
 # from software requirements specification (SRS)
-# document by TestFlows v2.0.231215.1221232.
+# document by TestFlows v2.0.240813.1212956.
 # Do not edit by hand but re-generate instead
 # using 'tfs requirements generate' command.
 from testflows.core import Specification
@@ -8,15 +8,16 @@ from testflows.core import Requirement
 
 Heading = Specification.Heading
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Config_ExternalTLS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Config.ExternalTLS',
+RQ_SRS_026_ClickHouseOperator_FIPS_Config_HTTP = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Config.HTTP',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'Plain HTTP/TCP on external connections SHALL be treated as a configuration error for FIPS compliance. TLS SHALL be enabled for connections to the [Kubernetes API], [ClickHouse Server], [ZooKeeper/Keeper], and Prometheus scrape endpoints.\n'
+        'All external connections SHALL require TLS with FIPS-compliant settings, except for localhost IPC between the operator\n'
+        'and metrics-exporter and the Prometheus metrics endpoints: `:9999` and :`8888`.\n'
         '\n'
     ),
     link=None,
@@ -60,8 +61,8 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries = Requirement(
         '\n'
     ),
     link=None,
-    level=3,
-    num='3.1.1'
+    level=2,
+    num='3.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries_StartupLogs = Requirement(
@@ -84,12 +85,10 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries_StartupLogs = Requireme
         'module=v1.0.0\n'
         '```\n'
         '\n'
-        '\n'
-        '\n'
     ),
     link=None,
-    level=3,
-    num='3.1.2'
+    level=2,
+    num='3.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers = Requirement(
@@ -103,12 +102,12 @@ RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers = Requirement(
         'TLS-enforced external connections for [clickhouse-operator] and [metrics-exporter]\n'
         'SHALL negotiate only TLS 1.3 with the following approved cipher suites.\n'
         '\n'
-        '| Cipher Suite | OpenSSL Name |\n'
-        '|--------------|--------------|\n'
-        '| TLS_AES_128_GCM_SHA256 | TLS_AES_128_GCM_SHA256 |\n'
-        '| TLS_AES_256_GCM_SHA384 | TLS_AES_256_GCM_SHA384 |\n'
-        '| TLS_AES_128_CCM_SHA256 | TLS_AES_128_CCM_SHA256 |\n'
-        '| TLS_AES_128_CCM_8_SHA256 | TLS_AES_128_CCM_8_SHA256 |\n'
+        '* TLS_AES_128_GCM_SHA256\n'
+        '* TLS_AES_256_GCM_SHA384\n'
+        '* TLS_CHACHA20_POLY1305_SHA256 (not accepted by default, needs to be specified explicitly in all openssl configs)\n'
+        '\n'
+        'Any other cipher suite or protocol version SHALL be rejected by operator in a FIPS-compliant configuration.\n'
+        '\n'
         '\n'
     ),
     link=None,
@@ -116,42 +115,71 @@ RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers = Requirement(
     num='4.1'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.TLS.RejectedCiphers',
+RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'TLS connections SHALL reject the following for all TLS-enabled external connections:\n'
+        'Deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.\n'
         '\n'
-        '- Any TLS cipher suite not explicitly listed in [RQ.SRS-026.ClickHouseOperator.FIPS.TLS.ApprovedCiphers](#rqsrs-026clickhouseoperatorfipstlsapprovedciphers)\n'
-        '- Protocol versions: SSLv2, SSLv3, TLS 1.0, TLS 1.1\n'
-        '- Cipher suites using non-approved/legacy algorithms (for this profile), including:\n'
-        '  - ChaCha20-Poly1305\n'
-        '  - RC4, RC2, DES, 3DES, IDEA, SEED, CAMELLIA, ARIA\n'
-        '  - NULL encryption / NULL authentication\n'
-        '  - Anonymous key exchange (`aNULL`, `eNULL`, `ADH`, `AECDH`)\n'
-        '  - Export/weak suites (`EXP`, `LOW`, `40-bit`, `56-bit`)\n'
-        '  - MD5- or SHA-1-based legacy suites\n'
+        '```yaml\n'
+        '  configuration:\n'
+        '    clusters:\n'
+        '      - name: default\n'
+        '        secure: "yes"\n'
+        '        insecure: "no"\n'
+        '        layout:\n'
+        '          shardsCount: 1\n'
+        '          replicasCount: 2\n'
+        '    zookeeper:\n'
+        '      nodes:\n'
+        '        - host: chk-test-030003-keeper-0-0\n'
+        '          port: 2281\n'
+        '          secure: "yes"\n'
+        '    settings:\n'
+        '      http_port: _removed_\n'
+        '      tcp_port: _removed_\n'
+        '      interserver_http_port: _removed_\n'
+        '      mysql_port: _removed_\n'
+        '      postgresql_port: _removed_\n'
+        '      https_port: 8443\n'
+        '      tcp_port_secure: 9440\n'
+        '      interserver_https_port: 9010\n'
+        '    files:\n'
+        '      openssl.xml: |\n'
+        '        <yandex>\n'
+        '          <openSSL>\n'
+        '            <server>\n'
+        '              <certificateFile>/etc/clickhouse-server/secrets.d/server.crt/clickhouse-certs/server.crt</certificateFile>\n'
+        '              <privateKeyFile>/etc/clickhouse-server/secrets.d/server.key/clickhouse-certs/server.key</privateKeyFile>\n'
+        '              <dhParamsFile>/etc/clickhouse-server/secrets.d/dhparam.pem/clickhouse-certs/dhparam.pem</dhParamsFile>\n'
+        '              <!-- Server-auth TLS only: clients validate this certificate; the server does not require client certificates (not mTLS). -->\n'
+        '              <verificationMode>none</verificationMode>\n'
+        '              <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>\n'
+        '              <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>\n'
+        '            </server>\n'
+        '            <client>\n'
+        '              <caConfig>/etc/clickhouse-server/secrets.d/ca.crt/clickhouse-certs/ca.crt</caConfig>\n'
+        '              <loadDefaultCAFile>false</loadDefaultCAFile>\n'
+        '              <verificationMode>strict</verificationMode>\n'
+        '              <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>\n'
+        '              <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>\n'
+        '            </client>\n'
+        '          </openSSL>\n'
+        '        </yandex>\n'
+        '```\n'
         '\n'
+        'The deployed ClickHouse server SHALL use only the following ports:\n'
         '\n'
-    ),
-    link=None,
-    level=3,
-    num='4.2.1'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_FIPSConfig = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.FIPSConfig',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Deploying a CHI with FIPS TLS settings SHALL start ClickHouse with FIPS-compliant TLS configuration.\n'
+        '* HTTPS API port 8443 (instead of 8123)\n'
+        '* Secure native TCP port 9440 (instead of 9000)\n'
+        '* Interserver HTTPS port 9010 (instead of interserver HTTP port 9009)\n'
+        '* Backup sidecar HTTPS API port 7171 (instead of 7180), when backups are enabled\n'
+        '\n'
+        'Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.\n'
         '\n'
     ),
     link=None,
@@ -159,15 +187,15 @@ RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_FIPSConfig = Requirement(
     num='5.1.1'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHIDeploy = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHIDeploy',
+RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig_ExternalClient = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig.ExternalClient',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'The operator SHALL deploy FIPS `ClickHouseInstallation` resources to `Completed` with Running pods when configuration is valid.\n'
+        'External clients connecting to the ClickHouse server SHALL be able to use any enabled TLS protocol version, including TLS 1.2.\n'
         '\n'
     ),
     link=None,
@@ -175,15 +203,17 @@ RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHIDeploy = Requirement(
     num='5.1.2'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainHTTP = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainHTTP',
+RQ_SRS_026_ClickHouseOperator_FIPS_CH_Rescale = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.Rescale',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'When FIPS transport hardening applies, ClickHouse pods SHALL NOT listen on plain HTTP port 8123; HTTPS port 8443 SHALL be used.\n'
+        'Adding or removing a replica from a FIPS-configured `ClickHouseInstallation` SHALL reconcile successfully and result in the expected number of running pods.\n'
+        '\n'
+        'After rescaling, all replicas SHALL continue to run the FIPS ClickHouse binary and maintain the configured TLS-only OpenSSL settings.\n'
         '\n'
     ),
     link=None,
@@ -191,88 +221,8 @@ RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainHTTP = Requirement(
     num='5.1.3'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainNative = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainNative',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'When FIPS transport hardening applies, ClickHouse pods SHALL NOT listen on plain native TCP port 9000; secure native port 9440 SHALL be used.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.1.4'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoUnexpectedPorts = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoUnexpectedPorts',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'ClickHouse pods in a FIPS deployment SHALL expose only expected secure listener ports and no additional unexpected ports.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.1.5'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_InternodeTLS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.InternodeTLS',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'ReplicatedMergeTree replicas SHALL communicate over interserver HTTPS (`interserver_https_port`) and data SHALL converge across replicas.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.1.6'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ScaleUp = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleUp',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Adding a replica to a FIPS-configured CHI SHALL reconcile to `Completed` and the new replica SHALL run the FIPS ClickHouse binary with TLS-only listeners.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.1.7'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ScaleDown = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleDown',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Removing a replica from a FIPS-configured CHI SHALL reconcile to `Completed` and remaining replicas SHALL keep FIPS binary and TLS-only configuration.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.1.8'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ConfigUpdate = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ConfigUpdate',
+RQ_SRS_026_ClickHouseOperator_FIPS_CH_ConfigUpdate = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.ConfigUpdate',
     version='1.0',
     priority=None,
     group=None,
@@ -285,276 +235,60 @@ RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ConfigUpdate = Requirement(
     ),
     link=None,
     level=3,
-    num='5.1.9'
+    num='5.1.4'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_FIPSConfig = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.FIPSConfig',
+RQ_SRS_026_ClickHouseOperator_FIPS_CHK_FIPSConfig = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'Deploying a CHK with FIPS TLS settings SHALL start Keeper with FIPS-compliant TLS configuration.\n'
+        'Deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.\n'
         '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.1'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHKDeploy = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHKDeploy',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The operator SHALL deploy FIPS `ClickHouseKeeperInstallation` resources to `Completed` with Running pods when configuration is valid.\n'
+        '```yaml\n'
+        '  configuration:\n'
+        '    clusters:\n'
+        '      - name: keeper\n'
+        '        secure: "yes"\n'
+        '        insecure: "no"\n'
+        '        layout:\n'
+        '          replicasCount: 2\n'
+        '    settings:\n'
+        '      keeper_server/log_storage_path: /var/lib/clickhouse/coordination/log\n'
+        '      keeper_server/snapshot_storage_path: /var/lib/clickhouse/coordination/snapshots\n'
+        '      keeper_server/raft_configuration/server/port: 9444\n'
+        '    files:\n'
+        '      openssl.xml: |\n'
+        '        <clickhouse>\n'
+        '          <openSSL>\n'
+        '              <server>\n'
+        '                <certificateFile>/etc/clickhouse-server/secrets.d/server.crt/clickhouse-certs/server.crt</certificateFile>\n'
+        '                <privateKeyFile>/etc/clickhouse-server/secrets.d/server.key/clickhouse-certs/server.key</privateKeyFile>\n'
+        '                <!-- Server-auth TLS only: clients validate this certificate; the server does not require client certificates (not mTLS). -->\n'
+        '                <verificationMode>none</verificationMode>\n'
+        '                <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>\n'
+        '                <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>\n'
+        '              </server>\n'
+        '              <client>\n'
+        '                <caConfig>/etc/clickhouse-server/secrets.d/ca.crt/clickhouse-certs/ca.crt</caConfig>\n'
+        '                <loadDefaultCAFile>false</loadDefaultCAFile>\n'
+        '                <verificationMode>strict</verificationMode>\n'
+        '                <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>\n'
+        '                <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>\n'
+        '              </client>\n'
+        '          </openSSL>\n'
+        '        </clickhouse>\n'
+        '```\n'
         '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.2'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_NoPlainClientPort = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoPlainClientPort',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'When FIPS transport hardening applies, Keeper pods SHALL NOT listen on plain client port 2181; secure client port 2281 SHALL be used.\n'
+        'The deployed ClickHouse Keeper cluster SHALL use only the following ports:\n'
         '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_NoUnexpectedPorts = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoUnexpectedPorts',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Keeper pods in a FIPS deployment SHALL expose only expected secure listener ports.\n'
+        '* Secure client port 2281 (instead of 2181)\n'
+        '* Secure Raft communication port 9444\n'
         '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.4'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_RaftTLS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.RaftTLS',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Keeper Raft communication SHALL use TLS on the configured secure Raft port.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.5'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ScaleUp = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleUp',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Adding a node to a FIPS-configured Keeper cluster SHALL reconcile to `Completed` and the new node SHALL run the FIPS Keeper binary with TLS-only client and Raft listeners.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.6'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ScaleDown = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleDown',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Removing a node from a FIPS-configured Keeper cluster SHALL reconcile to `Completed` and remaining nodes SHALL keep FIPS configuration.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.7'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ConfigUpdate = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ConfigUpdate',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Updating TLS settings on a running CHK SHALL reload Keeper with the new FIPS-compliant configuration.\n'
-        '\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.2.8'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_VersionString = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.VersionString',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'A running ClickHouse host under FIPS image policy SHALL report a `version()` string containing `fips` (case-insensitive).\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.1'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_FIPSBinary = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.FIPSBinary',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The `clickhouse-backup` sidecar SHALL run a FIPS-built binary; `clickhouse-backup --version` SHALL contain `fips` (case-insensitive).\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.2'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_GOFIPS140 = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.GOFIPS140',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'When inspectable, the clickhouse-backup sidecar binary SHALL embed `GOFIPS140=v1.0.0` per `go version -m`.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_OnlyTLSPorts = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.OnlyTLSPorts',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The clickhouse-backup sidecar SHALL expose only secure listener ports (including HTTPS API port 7171).\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.4'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_HTTPSAPI = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.HTTPSAPI',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The clickhouse-backup HTTPS API SHALL serve over TLS with CA-trust enforcement: trusted clients accepted, untrusted clients rejected.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.5'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_ClickHouseOverTLS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.ClickHouseOverTLS',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The clickhouse-backup sidecar SHALL reach ClickHouse over secure native TCP.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.6'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_RestoreRoundTrip = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RestoreRoundTrip',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Backup and restore through the HTTPS API SHALL succeed over TLS.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.7'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_RemoteUploadTLS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RemoteUploadTLS',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Remote backup upload to object storage SHALL use FIPS-approved TLS.\n'
-        '\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='5.3.8'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceVerifyStrict = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceVerifyStrict',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'With `fips.enforced=true`, unset TLS verify SHALL be coerced to Strict for ClickHouse, ZooKeeper/Keeper, and Kubernetes clients.\n'
+        'Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.\n'
         '\n'
     ),
     link=None,
@@ -562,16 +296,19 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceVerifyStrict = Requirement(
     num='6.1.1'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceMinVersion13 = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceMinVersion13',
+RQ_SRS_026_ClickHouseOperator_FIPS_CHK_Rescale = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CHK.Rescale',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'With `fips.enforced=true`, unset TLS minVersion SHALL be coerced to 1.3 for the\n'
-        "operator's outbound TLS clients.\n"
+        'Adding or removing a node from a FIPS-configured `ClickHouseKeeperInstallation` SHALL reconcile successfully and result \n'
+        'in the expected number of running pods.\n'
+        '\n'
+        'After rescaling, all Keeper nodes SHALL continue to run the FIPS ClickHouse Keeper binary and maintain the configured \n'
+        'TLS-only OpenSSL settings.\n'
         '\n'
     ),
     link=None,
@@ -579,15 +316,117 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceMinVersion13 = Requirement(
     num='6.1.2'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_OverrideMinVersion12To13 = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.OverrideMinVersion12To13',
+RQ_SRS_026_ClickHouseOperator_FIPS_CHK_ConfigUpdate = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.CHK.ConfigUpdate',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL coerce `minVersion` to `"1.3"` for `security.clickhouse.tls`, `security.zookeeper.tls`, and `security.kubernetes.tls`, even when those fields are explicitly set to `"1.2"`.\n'
+        'Updating TLS settings on a running CHK SHALL reload ClickHouse with the new FIPS-compliant configuration.\n'
+        '\n'
+        '\n'
+    ),
+    link=None,
+    level=3,
+    num='6.1.3'
+)
+
+RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSBinary = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSBinary',
+    version='1.0',
+    priority=None,
+    group=None,
+    type=None,
+    uid=None,
+    description=(
+        'The `clickhouse-backup` sidecar SHALL run a FIPS-built binary.\n'
+        '\n'
+        'The sidecar binary SHALL satisfy all of the following:\n'
+        '\n'
+        '* `clickhouse-backup --version` contains `fips` (case-insensitive)\n'
+        '* When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`\n'
+        '\n'
+    ),
+    link=None,
+    level=3,
+    num='7.1.1'
+)
+
+RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSConfig = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig',
+    version='1.0',
+    priority=None,
+    group=None,
+    type=None,
+    uid=None,
+    description=(
+        'Deploying a `ClickHouseInstallation` with a FIPS-configured backup sidecar SHALL start `clickhouse-backup` with a FIPS-compliant TLS configuration.\n'
+        '\n'
+        'The deployed backup sidecar SHALL only add the following listener ports to the clickhouse container:\n'
+        '\n'
+        '* HTTPS API port 7171 (instead of 7180)\n'
+        '\n'
+        'Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.\n'
+        '\n'
+        'The `clickhouse-backup` sidecar SHALL connect to ClickHouse using secure native TCP with TLS enabled.\n'
+        '\n'
+    ),
+    link=None,
+    level=3,
+    num='7.1.2'
+)
+
+RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RestoreRoundTrip = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RestoreRoundTrip',
+    version='1.0',
+    priority=None,
+    group=None,
+    type=None,
+    uid=None,
+    description=(
+        'Creating a backup and restoring it through the HTTPS API SHALL succeed over TLS.\n'
+        '\n'
+    ),
+    link=None,
+    level=3,
+    num='7.1.3'
+)
+
+RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RemoteUploadTLS = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS',
+    version='1.0',
+    priority=None,
+    group=None,
+    type=None,
+    uid=None,
+    description=(
+        'Uploading backups to remote object storage SHALL use FIPS-compliant TLS communication.\n'
+        '\n'
+        '\n'
+    ),
+    link=None,
+    level=3,
+    num='7.1.4'
+)
+
+RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion',
+    version='1.0',
+    priority=None,
+    group=None,
+    type=None,
+    uid=None,
+    description=(
+        'When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL coerce unset or relaxed security settings as follows:\n'
+        '\n'
+        '* Unset TLS verify SHALL be coerced to Strict for ClickHouse, ZooKeeper/Keeper, and Kubernetes clients.\n'
+        '* Unset TLS `minVersion` SHALL be coerced to `"1.3"` for the operator\'s outbound TLS clients (`security.clickhouse.tls`, `security.zookeeper.tls`, and `security.kubernetes.tls`).\n'
+        '* Explicit `minVersion: "1.2"` for those TLS clients SHALL be coerced to `"1.3"`.\n'
+        '* Unset IPC mode SHALL be coerced to Secure.\n'
+        '\n'
+        'Example configuration with explicit `minVersion: "1.2"`:\n'
         '\n'
         '```yaml\n'
         'spec:\n'
@@ -605,28 +444,12 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_OverrideMinVersion12To13 = Requireme
         '        minVersion: "1.2"\n'
         '```\n'
         '\n'
-        'After operator configuration normalization, the effective `minVersion` for each component listed above SHALL be `"1.3"`.\n'
+        'After operator configuration normalization, the effective `minVersion` for each TLS client listed above SHALL be `"1.3"`.\n'
         '\n'
     ),
     link=None,
     level=3,
-    num='6.1.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceIPCSecure = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceIPCSecure',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'With `fips.enforced=true`, unset IPC mode SHALL be coerced to Secure.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.1.4'
+    num='7.2.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInsecureKubeconfig = Requirement(
@@ -642,87 +465,30 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInsecureKubeconfig = Requireme
     ),
     link=None,
     level=3,
-    num='6.1.5'
+    num='7.2.2'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectVerifyNoneCHI = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI',
+RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'CHI with `clickhouse.tls.verify=None` under enforced mode SHALL be rejected with `FIPSValidationFailed`.\n'
+        'When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL reject \n'
+        'non-compliant CHI and CHK specifications with `FIPSValidationFailed` and SHALL NOT create workload StatefulSets for:\n'
+        '\n'
+        '* CHI referencing plain external ZooKeeper nodes, including when `secure` is explicitly set to `"false"`.\n'
+        '* CHI with `clickhouse.tls.verify=None` at spec or cluster level.\n'
+        '* CHI with `zookeeper.tls.verify=None`.\n'
+        '* CHI with invalid `clickhouse.tls.minVersion`.\n'
+        '* CHK with TLS verify bypass at spec level.\n'
         '\n'
     ),
     link=None,
     level=3,
-    num='6.1.6'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectVerifyNoneZK = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'CHI with `zookeeper.tls.verify=None` under enforced mode SHALL be rejected.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.1.7'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInvalidMinVersion = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'CHI with invalid TLS minVersion under enforced mode SHALL be rejected.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.1.8'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectExternalZookeeper = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'CHI referencing plain external ZooKeeper nodes under enforced mode SHALL be rejected.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.1.9'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectCHKBypass = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'CHK with TLS verify bypass under enforced mode SHALL be rejected.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.1.10'
+    num='7.2.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope = Requirement(
@@ -739,23 +505,30 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope = Requirement(
     ),
     link=None,
     level=3,
-    num='6.1.11'
+    num='7.2.4'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectCHI = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHI',
+RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'With `security.fips.images.policy=Required`, CHI with non-FIPS image tag SHALL be rejected with `FIPSImagePolicyViolation`.\n'
+        'With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected with `FIPSImagePolicyViolation` as follows:\n'
+        '\n'
+        '* CHI with non-FIPS image tag SHALL be rejected at admission.\n'
+        '* CHK with non-FIPS Keeper image SHALL be rejected at admission.\n'
+        '* CHI with multiple non-FIPS hosts SHALL produce a single policy violation error.\n'
+        '* Digest-only image references SHALL NOT be detected as FIPS at admission.\n'
+        '* Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.\n'
+        '* CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.\n'
         '\n'
     ),
     link=None,
     level=3,
-    num='6.2.1'
+    num='7.3.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_AcceptCHI = Requirement(
@@ -771,39 +544,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_AcceptCHI = Requirement(
     ),
     link=None,
     level=3,
-    num='6.2.2'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectCHK = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHK',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'With image policy Required, CHK with non-FIPS Keeper image SHALL be rejected.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.2.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RuntimeVersion = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RuntimeVersion',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'With image policy Required, host `SELECT version()` lacking `fips` SHALL fail with `FIPSImagePolicyViolation`.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.2.4'
+    num='7.3.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Images_Permissive = Requirement(
@@ -816,27 +557,11 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_Permissive = Requirement(
     description=(
         'With permissive image policy, non-FIPS CHI images SHALL reconcile (default).\n'
         '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.2.5'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_ShortCircuit = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.ShortCircuit',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Multiple non-FIPS hosts SHALL produce a single policy violation error.\n'
-        '\n'
         '\n'
     ),
     link=None,
     level=3,
-    num='6.2.6'
+    num='7.3.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix = Requirement(
@@ -852,7 +577,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix = Requirement(
     ),
     link=None,
     level=3,
-    num='6.3.1'
+    num='7.4.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS = Requirement(
@@ -868,39 +593,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS = Requiremen
     ),
     link=None,
     level=3,
-    num='6.3.2'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_DigestOnly = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.DigestOnly',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Digest-only image references SHALL NOT be detected as FIPS at admission.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.3.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_RegistryPath = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.RegistryPath',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='6.3.4'
+    num='7.4.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive = Requirement(
@@ -917,7 +610,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive = Require
     ),
     link=None,
     level=3,
-    num='6.3.5'
+    num='7.4.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Listeners = Requirement(
@@ -928,13 +621,16 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Listeners = Requirement(
     type=None,
     uid=None,
     description=(
-        'FIPS workload pods (ClickHouse, Keeper, and sidecar containers) SHALL listen only on expected TLS ports. Plaintext service ports (8123, 9000, 2181) SHALL NOT be open when FIPS transport hardening applies. The clickhouse-operator pod network namespace SHALL expose only the expected Prometheus listener ports: `:8888` for metrics-exporter and `:9999` for clickhouse-operator, because both containers share the same pod network namespace.\n'
+        'FIPS workload pods (ClickHouse, Keeper, and sidecar containers) SHALL listen only on expected TLS ports. \n'
+        'Plaintext service ports (8123, 9000, 2181) SHALL NOT be open when FIPS transport hardening applies. \n'
+        'The clickhouse-operator pod network namespace SHALL expose only the expected Prometheus listener ports: `:8888` for \n'
+        'metrics-exporter and `:9999` for clickhouse-operator, because both containers share the same pod network namespace.\n'
         '\n'
         '\n'
     ),
     link=None,
     level=3,
-    num='7.1.2'
+    num='7.5.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Kubernetes = Requirement(
@@ -951,7 +647,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Kubernetes = Requirement(
     ),
     link=None,
     level=3,
-    num='7.2.1'
+    num='7.6.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_ClickHouse = Requirement(
@@ -968,7 +664,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_ClickHouse = Requirement(
     ),
     link=None,
     level=3,
-    num='7.3.1'
+    num='7.7.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Zookeeper = Requirement(
@@ -985,7 +681,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Zookeeper = Requirement(
     ),
     link=None,
     level=3,
-    num='7.4.1'
+    num='7.8.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_IPCSecure = Requirement(
@@ -1002,7 +698,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_IPCSecure = Requirement(
     ),
     link=None,
     level=3,
-    num='7.5.1'
+    num='7.9.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Gap_OperatorMetricsTLS = Requirement(
@@ -1019,7 +715,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Gap_OperatorMetricsTLS = Requirement(
     ),
     link=None,
     level=3,
-    num='7.6.1'
+    num='7.10.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_Kubernetes = Requirement(
@@ -1488,83 +1184,51 @@ Inbound_connection_to_operator_exporter_metrics_endpoint = Specification(
     headings=(
         Heading(name='Introduction', level=1, num='1'),
         Heading(name='Configuration Requirements', level=1, num='2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Config.ExternalTLS', level=2, num='2.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Config.HTTP', level=2, num='2.1'),
         Heading(name='Build Verification', level=1, num='3'),
-        Heading(name='Shipped Binaries', level=2, num='3.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries', level=3, num='3.1.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries.StartupLogs', level=3, num='3.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries', level=2, num='3.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries.StartupLogs', level=2, num='3.2'),
         Heading(name='Approved TLS Cipher Suites', level=1, num='4'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.TLS.ApprovedCiphers', level=2, num='4.1'),
-        Heading(name='Rejected Cipher Suites and Protocols', level=2, num='4.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.TLS.RejectedCiphers', level=3, num='4.2.1'),
-        Heading(name='ClickHouse Server and Keeper FIPS Configurations', level=1, num='5'),
-        Heading(name='ClickHouse Server', level=2, num='5.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.FIPSConfig', level=3, num='5.1.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHIDeploy', level=3, num='5.1.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainHTTP', level=3, num='5.1.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainNative', level=3, num='5.1.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoUnexpectedPorts', level=3, num='5.1.5'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.InternodeTLS', level=3, num='5.1.6'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleUp', level=3, num='5.1.7'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleDown', level=3, num='5.1.8'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ConfigUpdate', level=3, num='5.1.9'),
-        Heading(name='ClickHouse Keeper', level=2, num='5.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.FIPSConfig', level=3, num='5.2.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHKDeploy', level=3, num='5.2.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoPlainClientPort', level=3, num='5.2.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoUnexpectedPorts', level=3, num='5.2.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.RaftTLS', level=3, num='5.2.5'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleUp', level=3, num='5.2.6'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleDown', level=3, num='5.2.7'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ConfigUpdate', level=3, num='5.2.8'),
-        Heading(name='ClickHouse Backup Sidecar', level=2, num='5.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.VersionString', level=3, num='5.3.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.FIPSBinary', level=3, num='5.3.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.GOFIPS140', level=3, num='5.3.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.OnlyTLSPorts', level=3, num='5.3.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.HTTPSAPI', level=3, num='5.3.5'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.ClickHouseOverTLS', level=3, num='5.3.6'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RestoreRoundTrip', level=3, num='5.3.7'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RemoteUploadTLS', level=3, num='5.3.8'),
-        Heading(name='FIPS Enforcement Mode', level=1, num='6'),
-        Heading(name='Security Coercion', level=2, num='6.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceVerifyStrict', level=3, num='6.1.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceMinVersion13', level=3, num='6.1.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.OverrideMinVersion12To13', level=3, num='6.1.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceIPCSecure', level=3, num='6.1.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig', level=3, num='6.1.5'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI', level=3, num='6.1.6'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK', level=3, num='6.1.7'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion', level=3, num='6.1.8'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper', level=3, num='6.1.9'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass', level=3, num='6.1.10'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope', level=3, num='6.1.11'),
-        Heading(name='Image Policy', level=2, num='6.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHI', level=3, num='6.2.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.AcceptCHI', level=3, num='6.2.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHK', level=3, num='6.2.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RuntimeVersion', level=3, num='6.2.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive', level=3, num='6.2.5'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.ShortCircuit', level=3, num='6.2.6'),
-        Heading(name='Image Tag Detection', level=2, num='6.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix', level=3, num='6.3.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS', level=3, num='6.3.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.DigestOnly', level=3, num='6.3.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.RegistryPath', level=3, num='6.3.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive', level=3, num='6.3.5'),
-        Heading(name='Operator External Connections', level=1, num='7'),
-        Heading(name='Operator Runtime Listener Verification', level=2, num='7.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Listeners', level=3, num='7.1.1'),
-        Heading(name='Operator to Kubernetes API', level=2, num='7.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Kubernetes', level=3, num='7.2.1'),
-        Heading(name='Operator to ClickHouse Server', level=2, num='7.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse', level=3, num='7.3.1'),
-        Heading(name='Operator to ZooKeeper/Keeper', level=2, num='7.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Zookeeper', level=3, num='7.4.1'),
-        Heading(name='Operator to metrics-exporter IPC', level=2, num='7.5'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure', level=3, num='7.5.1'),
-        Heading(name='Operator Prometheus Metrics', level=2, num='7.6'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Gap.OperatorMetricsTLS', level=3, num='7.6.1'),
+        Heading(name='ClickHouse Server', level=1, num='5'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig', level=3, num='5.1.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig.ExternalClient', level=3, num='5.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.Rescale', level=3, num='5.1.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CH.ConfigUpdate', level=3, num='5.1.4'),
+        Heading(name='ClickHouse Keeper', level=1, num='6'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig', level=3, num='6.1.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CHK.Rescale', level=3, num='6.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CHK.ConfigUpdate', level=3, num='6.1.3'),
+        Heading(name='ClickHouse Backup Sidecar', level=1, num='7'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSBinary', level=3, num='7.1.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig', level=3, num='7.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RestoreRoundTrip', level=3, num='7.1.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS', level=3, num='7.1.4'),
+        Heading(name='Security Coercion', level=2, num='7.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion', level=3, num='7.2.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig', level=3, num='7.2.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs', level=3, num='7.2.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope', level=3, num='7.2.4'),
+        Heading(name='Image Policy', level=2, num='7.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS', level=3, num='7.3.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.AcceptCHI', level=3, num='7.3.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive', level=3, num='7.3.3'),
+        Heading(name='Image Tag Detection', level=2, num='7.4'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix', level=3, num='7.4.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS', level=3, num='7.4.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive', level=3, num='7.4.3'),
+        Heading(name='Operator Runtime Listener Verification', level=2, num='7.5'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Listeners', level=3, num='7.5.1'),
+        Heading(name='Operator to Kubernetes API', level=2, num='7.6'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Kubernetes', level=3, num='7.6.1'),
+        Heading(name='Operator to ClickHouse Server', level=2, num='7.7'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse', level=3, num='7.7.1'),
+        Heading(name='Operator to ZooKeeper/Keeper', level=2, num='7.8'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Zookeeper', level=3, num='7.8.1'),
+        Heading(name='Operator to metrics-exporter IPC', level=2, num='7.9'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure', level=3, num='7.9.1'),
+        Heading(name='Operator Prometheus Metrics', level=2, num='7.10'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Gap.OperatorMetricsTLS', level=3, num='7.10.1'),
         Heading(name='Exporter External Connections', level=1, num='8'),
         Heading(name='Exporter to Kubernetes API', level=2, num='8.1'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.Kubernetes', level=3, num='8.1.1'),
@@ -1623,57 +1287,30 @@ Inbound_connection_to_operator_exporter_metrics_endpoint = Specification(
         Heading(name='CAVP', level=2, num='14.9'),
         ),
     requirements=(
-        RQ_SRS_026_ClickHouseOperator_FIPS_Config_ExternalTLS,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Config_HTTP,
         RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries,
         RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries_StartupLogs,
         RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers,
-        RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_FIPSConfig,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHIDeploy,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainHTTP,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainNative,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoUnexpectedPorts,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_InternodeTLS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ScaleUp,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ScaleDown,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ConfigUpdate,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_FIPSConfig,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHKDeploy,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_NoPlainClientPort,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_NoUnexpectedPorts,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_RaftTLS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ScaleUp,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ScaleDown,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ConfigUpdate,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_VersionString,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_FIPSBinary,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_GOFIPS140,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_OnlyTLSPorts,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_HTTPSAPI,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_ClickHouseOverTLS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_RestoreRoundTrip,
-        RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_RemoteUploadTLS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceVerifyStrict,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceMinVersion13,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_OverrideMinVersion12To13,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceIPCSecure,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig_ExternalClient,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CH_Rescale,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CH_ConfigUpdate,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CHK_FIPSConfig,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CHK_Rescale,
+        RQ_SRS_026_ClickHouseOperator_FIPS_CHK_ConfigUpdate,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSBinary,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSConfig,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RestoreRoundTrip,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RemoteUploadTLS,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion,
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInsecureKubeconfig,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectVerifyNoneCHI,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectVerifyNoneZK,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInvalidMinVersion,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectExternalZookeeper,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectCHKBypass,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs,
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectCHI,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_AcceptCHI,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectCHK,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RuntimeVersion,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_Permissive,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_ShortCircuit,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_DigestOnly,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_RegistryPath,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive,
         RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Listeners,
         RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Kubernetes,
@@ -1708,7 +1345,7 @@ Inbound_connection_to_operator_exporter_metrics_endpoint = Specification(
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount,
         ),
-    content='''
+    content=r'''
 # QA-SRS ClickHouse Operator FIPS 140-3
 # Software Requirements Specification
 
@@ -1771,16 +1408,13 @@ Inbound_connection_to_operator_exporter_metrics_endpoint = Specification(
         * 6.3.7 [RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RemoteUploadTLS](#rqsrs026clickhouseoperatorfipsdataplanebackupremoteuploadtls)
 * 7 [FIPS Enforcement Mode](#fips-enforcement-mode)
     * 7.1 [Security Coercion](#security-coercion)
-        * 7.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceVerifyStrict](#rqsrs026clickhouseoperatorfipsenforcedcoerceverifystrict)
-        * 7.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceMinVersion13](#rqsrs026clickhouseoperatorfipsenforcedcoerceminversion13)
-        * 7.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.OverrideMinVersion12To13](#rqsrs-026clickhouseoperatorfipsenforcedoverrideminversion12to13)
-        * 7.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceIPCSecure](#rqsrs026clickhouseoperatorfipsenforcedcoerceipcsecure)
-        * 7.1.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig](#rqsrs026clickhouseoperatorfipsenforcedrejectinsecurekubeconfig)
-        * 7.1.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonechi)
-        * 7.1.7 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonezk)
-        * 7.1.8 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion](#rqsrs026clickhouseoperatorfipsenforcedrejectinvalidminversion)
-        * 7.1.9 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper](#rqsrs026clickhouseoperatorfipsenforcedrejectexternalzookeeper)
-        * 7.1.10 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass](#rqsrs026clickhouseoperatorfipsenforcedrejectchkbypass)
+        * 7.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion](#rqsrs026clickhouseoperatorfipsenforcedsecuritycoercion)
+        * 7.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig](#rqsrs026clickhouseoperatorfipsenforcedrejectinsecurekubeconfig)
+        * 7.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonechi)
+        * 7.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonezk)
+        * 7.1.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion](#rqsrs026clickhouseoperatorfipsenforcedrejectinvalidminversion)
+        * 7.1.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper](#rqsrs026clickhouseoperatorfipsenforcedrejectexternalzookeeper)
+        * 7.1.7 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass](#rqsrs026clickhouseoperatorfipsenforcedrejectchkbypass)
     * 7.2 [Image Policy](#image-policy)
         * 7.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHI](#rqsrs026clickhouseoperatorfipsimagesrequiredrejectchi)
         * 7.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.AcceptCHI](#rqsrs026clickhouseoperatorfipsimagesrequiredacceptchi)
@@ -1893,25 +1527,15 @@ TLS must be enabled for all connections to:
 - ZooKeeper/Keeper
 - Prometheus scrape endpoints
 
-### RQ.SRS-026.ClickHouseOperator.FIPS.Config.ExternalTLS
+### RQ.SRS-026.ClickHouseOperator.FIPS.Config.HTTP
 version: 1.0
 
-Plain HTTP/TCP on external connections SHALL be treated as a configuration error for FIPS compliance. TLS SHALL be enabled for connections to the [Kubernetes API], [ClickHouse Server], [ZooKeeper/Keeper], and Prometheus scrape endpoints.
+All external connections SHALL require TLS with FIPS-compliant settings, except for localhost IPC between the operator
+and metrics-exporter and the Prometheus metrics endpoints: `:9999` and :`8888`.
 
 ## Build Verification
 
-**Objective:** Verify each shipped binary is a FIPS build and linked to Go Cryptographic Module v1.0.0.
-
-**Certificates:**
-- [CMVP #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247)
-- [CAVP A6650](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/details?product=19371)
-
-**Build requirement:** `GOFIPS140=v1.0.0` (or `certified`)
-
-
-### Shipped Binaries
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries
+### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries
 version: 1.0
 
 Each shipped pod binary — `clickhouse-operator` and `metrics-exporter` — SHALL satisfy all of the following:
@@ -1940,7 +1564,7 @@ Examples:
     enabled: true
   ```
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries.StartupLogs
+### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries.StartupLogs
 version: 1.0
 
 At startup, each binary SHALL emit a FIPS startup banner in logs indicating build and runtime FIPS state.
@@ -1955,8 +1579,6 @@ runtime.enforced=true \
 module=v1.0.0
 ```
 
-
-
 ## Approved TLS Cipher Suites
 
 ### RQ.SRS-026.ClickHouseOperator.FIPS.TLS.ApprovedCiphers
@@ -1965,192 +1587,207 @@ version: 1.0
 TLS-enforced external connections for [clickhouse-operator] and [metrics-exporter]
 SHALL negotiate only TLS 1.3 with the following approved cipher suites.
 
-| Cipher Suite | OpenSSL Name |
-|--------------|--------------|
-| TLS_AES_128_GCM_SHA256 | TLS_AES_128_GCM_SHA256 |
-| TLS_AES_256_GCM_SHA384 | TLS_AES_256_GCM_SHA384 |
-| TLS_AES_128_CCM_SHA256 | TLS_AES_128_CCM_SHA256 |
-| TLS_AES_128_CCM_8_SHA256 | TLS_AES_128_CCM_8_SHA256 |
+* TLS_AES_128_GCM_SHA256
+* TLS_AES_256_GCM_SHA384
+* TLS_CHACHA20_POLY1305_SHA256 (not accepted by default, needs to be specified explicitly in all openssl configs)
 
-### Rejected Cipher Suites and Protocols
+Any other cipher suite or protocol version SHALL be rejected by operator in a FIPS-compliant configuration.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.TLS.RejectedCiphers
+
+## ClickHouse Server
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig
 version: 1.0
 
-TLS connections SHALL reject the following for all TLS-enabled external connections:
+Deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.
 
-- Any TLS cipher suite not explicitly listed in [RQ.SRS-026.ClickHouseOperator.FIPS.TLS.ApprovedCiphers](#rqsrs-026clickhouseoperatorfipstlsapprovedciphers)
-- Protocol versions: SSLv2, SSLv3, TLS 1.0, TLS 1.1
-- Cipher suites using non-approved/legacy algorithms (for this profile), including:
-  - ChaCha20-Poly1305
-  - RC4, RC2, DES, 3DES, IDEA, SEED, CAMELLIA, ARIA
-  - NULL encryption / NULL authentication
-  - Anonymous key exchange (`aNULL`, `eNULL`, `ADH`, `AECDH`)
-  - Export/weak suites (`EXP`, `LOW`, `40-bit`, `56-bit`)
-  - MD5- or SHA-1-based legacy suites
+```yaml
+  configuration:
+    clusters:
+      - name: default
+        secure: "yes"
+        insecure: "no"
+        layout:
+          shardsCount: 1
+          replicasCount: 2
+    zookeeper:
+      nodes:
+        - host: chk-test-030003-keeper-0-0
+          port: 2281
+          secure: "yes"
+    settings:
+      http_port: _removed_
+      tcp_port: _removed_
+      interserver_http_port: _removed_
+      mysql_port: _removed_
+      postgresql_port: _removed_
+      https_port: 8443
+      tcp_port_secure: 9440
+      interserver_https_port: 9010
+    files:
+      openssl.xml: |
+        <yandex>
+          <openSSL>
+            <server>
+              <certificateFile>/etc/clickhouse-server/secrets.d/server.crt/clickhouse-certs/server.crt</certificateFile>
+              <privateKeyFile>/etc/clickhouse-server/secrets.d/server.key/clickhouse-certs/server.key</privateKeyFile>
+              <dhParamsFile>/etc/clickhouse-server/secrets.d/dhparam.pem/clickhouse-certs/dhparam.pem</dhParamsFile>
+              <!-- Server-auth TLS only: clients validate this certificate; the server does not require client certificates (not mTLS). -->
+              <verificationMode>none</verificationMode>
+              <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+              <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+            </server>
+            <client>
+              <caConfig>/etc/clickhouse-server/secrets.d/ca.crt/clickhouse-certs/ca.crt</caConfig>
+              <loadDefaultCAFile>false</loadDefaultCAFile>
+              <verificationMode>strict</verificationMode>
+              <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+              <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+            </client>
+          </openSSL>
+        </yandex>
+```
 
+The deployed ClickHouse server SHALL use only the following ports:
 
-## ClickHouse Server and Keeper FIPS Configurations
+* HTTPS API port 8443 (instead of 8123)
+* Secure native TCP port 9440 (instead of 9000)
+* Interserver HTTPS port 9010 (instead of interserver HTTP port 9009)
+* Backup sidecar HTTPS API port 7171 (instead of 7180), when backups are enabled
 
-**Objective:** Verify the operator generates and maintains FIPS-compliant configurations for ClickHouse servers and Keepers.
+Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
 
-
-### ClickHouse Server
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.FIPSConfig
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig.ExternalClient
 version: 1.0
 
-Deploying a CHI with FIPS TLS settings SHALL start ClickHouse with FIPS-compliant TLS configuration.
+External clients connecting to the ClickHouse server SHALL be able to use any enabled TLS protocol version, including TLS 1.2.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHIDeploy
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.Rescale
 version: 1.0
 
-The operator SHALL deploy FIPS `ClickHouseInstallation` resources to `Completed` with Running pods when configuration is valid.
+Adding or removing a replica from a FIPS-configured `ClickHouseInstallation` SHALL reconcile successfully and result in the expected number of running pods.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainHTTP
-version: 1.0
+After rescaling, all replicas SHALL continue to run the FIPS ClickHouse binary and maintain the configured TLS-only OpenSSL settings.
 
-When FIPS transport hardening applies, ClickHouse pods SHALL NOT listen on plain HTTP port 8123; HTTPS port 8443 SHALL be used.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainNative
-version: 1.0
-
-When FIPS transport hardening applies, ClickHouse pods SHALL NOT listen on plain native TCP port 9000; secure native port 9440 SHALL be used.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoUnexpectedPorts
-version: 1.0
-
-ClickHouse pods in a FIPS deployment SHALL expose only expected secure listener ports and no additional unexpected ports.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.InternodeTLS
-version: 1.0
-
-ReplicatedMergeTree replicas SHALL communicate over interserver HTTPS (`interserver_https_port`) and data SHALL converge across replicas.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleUp
-version: 1.0
-
-Adding a replica to a FIPS-configured CHI SHALL reconcile to `Completed` and the new replica SHALL run the FIPS ClickHouse binary with TLS-only listeners.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleDown
-version: 1.0
-
-Removing a replica from a FIPS-configured CHI SHALL reconcile to `Completed` and remaining replicas SHALL keep FIPS binary and TLS-only configuration.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ConfigUpdate
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.ConfigUpdate
 version: 1.0
 
 Updating TLS settings on a running CHI SHALL reload ClickHouse with the new FIPS-compliant configuration.
 
 
-### ClickHouse Keeper
+## ClickHouse Keeper
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.FIPSConfig
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig
 version: 1.0
 
-Deploying a CHK with FIPS TLS settings SHALL start Keeper with FIPS-compliant TLS configuration.
+Deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHKDeploy
+```yaml
+  configuration:
+    clusters:
+      - name: keeper
+        secure: "yes"
+        insecure: "no"
+        layout:
+          replicasCount: 2
+    settings:
+      keeper_server/log_storage_path: /var/lib/clickhouse/coordination/log
+      keeper_server/snapshot_storage_path: /var/lib/clickhouse/coordination/snapshots
+      keeper_server/raft_configuration/server/port: 9444
+    files:
+      openssl.xml: |
+        <clickhouse>
+          <openSSL>
+              <server>
+                <certificateFile>/etc/clickhouse-server/secrets.d/server.crt/clickhouse-certs/server.crt</certificateFile>
+                <privateKeyFile>/etc/clickhouse-server/secrets.d/server.key/clickhouse-certs/server.key</privateKeyFile>
+                <!-- Server-auth TLS only: clients validate this certificate; the server does not require client certificates (not mTLS). -->
+                <verificationMode>none</verificationMode>
+                <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+                <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+              </server>
+              <client>
+                <caConfig>/etc/clickhouse-server/secrets.d/ca.crt/clickhouse-certs/ca.crt</caConfig>
+                <loadDefaultCAFile>false</loadDefaultCAFile>
+                <verificationMode>strict</verificationMode>
+                <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+                <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+              </client>
+          </openSSL>
+        </clickhouse>
+```
+
+The deployed ClickHouse Keeper cluster SHALL use only the following ports:
+
+* Secure client port 2281 (instead of 2181)
+* Secure Raft communication port 9444
+
+Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.Rescale
 version: 1.0
 
-The operator SHALL deploy FIPS `ClickHouseKeeperInstallation` resources to `Completed` with Running pods when configuration is valid.
+Adding or removing a node from a FIPS-configured `ClickHouseKeeperInstallation` SHALL reconcile successfully and result 
+in the expected number of running pods.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoPlainClientPort
+After rescaling, all Keeper nodes SHALL continue to run the FIPS ClickHouse Keeper binary and maintain the configured 
+TLS-only OpenSSL settings.
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.ConfigUpdate
 version: 1.0
 
-When FIPS transport hardening applies, Keeper pods SHALL NOT listen on plain client port 2181; secure client port 2281 SHALL be used.
+Updating TLS settings on a running CHK SHALL reload ClickHouse with the new FIPS-compliant configuration.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoUnexpectedPorts
+
+## ClickHouse Backup Sidecar
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSBinary
 version: 1.0
 
-Keeper pods in a FIPS deployment SHALL expose only expected secure listener ports.
+The `clickhouse-backup` sidecar SHALL run a FIPS-built binary.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.RaftTLS
+The sidecar binary SHALL satisfy all of the following:
+
+* `clickhouse-backup --version` contains `fips` (case-insensitive)
+* When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig
 version: 1.0
 
-Keeper Raft communication SHALL use TLS on the configured secure Raft port.
+Deploying a `ClickHouseInstallation` with a FIPS-configured backup sidecar SHALL start `clickhouse-backup` with a FIPS-compliant TLS configuration.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleUp
+The deployed backup sidecar SHALL only add the following listener ports to the clickhouse container:
+
+* HTTPS API port 7171 (instead of 7180)
+
+Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
+
+The `clickhouse-backup` sidecar SHALL connect to ClickHouse using secure native TCP with TLS enabled.
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RestoreRoundTrip
 version: 1.0
 
-Adding a node to a FIPS-configured Keeper cluster SHALL reconcile to `Completed` and the new node SHALL run the FIPS Keeper binary with TLS-only client and Raft listeners.
+Creating a backup and restoring it through the HTTPS API SHALL succeed over TLS.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleDown
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS
 version: 1.0
 
-Removing a node from a FIPS-configured Keeper cluster SHALL reconcile to `Completed` and remaining nodes SHALL keep FIPS configuration.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ConfigUpdate
-version: 1.0
-
-Updating TLS settings on a running CHK SHALL reload Keeper with the new FIPS-compliant configuration.
-
-
-### ClickHouse Backup Sidecar
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.VersionString
-version: 1.0
-
-A running ClickHouse host under FIPS image policy SHALL report a `version()` string containing `fips` (case-insensitive).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.FIPSBinary
-version: 1.0
-
-The `clickhouse-backup` sidecar SHALL run a FIPS-built binary; `clickhouse-backup --version` SHALL contain `fips` (case-insensitive).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.GOFIPS140
-version: 1.0
-
-When inspectable, the clickhouse-backup sidecar binary SHALL embed `GOFIPS140=v1.0.0` per `go version -m`.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.OnlyTLSPorts
-version: 1.0
-
-The clickhouse-backup sidecar SHALL expose only secure listener ports (including HTTPS API port 7171).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.HTTPSAPI
-version: 1.0
-
-The clickhouse-backup HTTPS API SHALL serve over TLS with CA-trust enforcement: trusted clients accepted, untrusted clients rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.ClickHouseOverTLS
-version: 1.0
-
-The clickhouse-backup sidecar SHALL reach ClickHouse over secure native TCP.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RestoreRoundTrip
-version: 1.0
-
-Backup and restore through the HTTPS API SHALL succeed over TLS.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RemoteUploadTLS
-version: 1.0
-
-Remote backup upload to object storage SHALL use FIPS-approved TLS.
-
-
-## FIPS Enforcement Mode
-
-**Objective:** Verify `security.fips.enforced=true` coerces security settings and rejects non-compliant configurations.
+Uploading backups to remote object storage SHALL use FIPS-compliant TLS communication.
 
 
 ### Security Coercion
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceVerifyStrict
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion
 version: 1.0
 
-With `fips.enforced=true`, unset TLS verify SHALL be coerced to Strict for ClickHouse, ZooKeeper/Keeper, and Kubernetes clients.
+When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL coerce unset or relaxed security settings as follows:
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceMinVersion13
-version: 1.0
+* Unset TLS verify SHALL be coerced to Strict for ClickHouse, ZooKeeper/Keeper, and Kubernetes clients.
+* Unset TLS `minVersion` SHALL be coerced to `"1.3"` for the operator's outbound TLS clients (`security.clickhouse.tls`, `security.zookeeper.tls`, and `security.kubernetes.tls`).
+* Explicit `minVersion: "1.2"` for those TLS clients SHALL be coerced to `"1.3"`.
+* Unset IPC mode SHALL be coerced to Secure.
 
-With `fips.enforced=true`, unset TLS minVersion SHALL be coerced to 1.3 for the
-operator's outbound TLS clients.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.OverrideMinVersion12To13
-version: 1.0
-
-When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL coerce `minVersion` to `"1.3"` for `security.clickhouse.tls`, `security.zookeeper.tls`, and `security.kubernetes.tls`, even when those fields are explicitly set to `"1.2"`.
+Example configuration with explicit `minVersion: "1.2"`:
 
 ```yaml
 spec:
@@ -2168,42 +1805,24 @@ spec:
         minVersion: "1.2"
 ```
 
-After operator configuration normalization, the effective `minVersion` for each component listed above SHALL be `"1.3"`.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceIPCSecure
-version: 1.0
-
-With `fips.enforced=true`, unset IPC mode SHALL be coerced to Secure.
+After operator configuration normalization, the effective `minVersion` for each TLS client listed above SHALL be `"1.3"`.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig
 version: 1.0
 
 The operator SHALL refuse to start when kubeconfig uses `TLSClientConfig.Insecure=true` under strict/FIPS mode.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs
 version: 1.0
 
-CHI with `clickhouse.tls.verify=None` under enforced mode SHALL be rejected with `FIPSValidationFailed`.
+When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL reject 
+non-compliant CHI and CHK specifications with `FIPSValidationFailed` and SHALL NOT create workload StatefulSets for:
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK
-version: 1.0
-
-CHI with `zookeeper.tls.verify=None` under enforced mode SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion
-version: 1.0
-
-CHI with invalid TLS minVersion under enforced mode SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper
-version: 1.0
-
-CHI referencing plain external ZooKeeper nodes under enforced mode SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass
-version: 1.0
-
-CHK with TLS verify bypass under enforced mode SHALL be rejected.
+* CHI referencing plain external ZooKeeper nodes, including when `secure` is explicitly set to `"false"`.
+* CHI with `clickhouse.tls.verify=None` at spec or cluster level.
+* CHI with `zookeeper.tls.verify=None`.
+* CHI with invalid `clickhouse.tls.minVersion`.
+* CHK with TLS verify bypass at spec level.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope
 version: 1.0
@@ -2213,35 +1832,27 @@ They SHALL NOT require ClickHouse Server or ClickHouse Keeper listener endpoints
 
 ### Image Policy
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHI
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS
 version: 1.0
 
-With `security.fips.images.policy=Required`, CHI with non-FIPS image tag SHALL be rejected with `FIPSImagePolicyViolation`.
+With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected with `FIPSImagePolicyViolation` as follows:
+
+* CHI with non-FIPS image tag SHALL be rejected at admission.
+* CHK with non-FIPS Keeper image SHALL be rejected at admission.
+* CHI with multiple non-FIPS hosts SHALL produce a single policy violation error.
+* Digest-only image references SHALL NOT be detected as FIPS at admission.
+* Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
+* CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.AcceptCHI
 version: 1.0
 
 With image policy Required, CHI with FIPS-tagged image SHALL reconcile normally.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHK
-version: 1.0
-
-With image policy Required, CHK with non-FIPS Keeper image SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RuntimeVersion
-version: 1.0
-
-With image policy Required, host `SELECT version()` lacking `fips` SHALL fail with `FIPSImagePolicyViolation`.
-
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive
 version: 1.0
 
 With permissive image policy, non-FIPS CHI images SHALL reconcile (default).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.ShortCircuit
-version: 1.0
-
-Multiple non-FIPS hosts SHALL produce a single policy violation error.
 
 
 ### Image Tag Detection
@@ -2256,25 +1867,10 @@ version: 1.0
 
 Image tags containing `altinityfips` SHALL be detected as FIPS.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.DigestOnly
-version: 1.0
-
-Digest-only image references SHALL NOT be detected as FIPS at admission.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.RegistryPath
-version: 1.0
-
-Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
-
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive
 version: 1.0
 
 Image tags such as `25.3.FIPS` or `25.3.Fips` SHALL be detected as FIPS (case-insensitive match on the tag).
-
-
-## Operator External Connections
-
-**Objective:** Verify all **clickhouse-operator** inbound and outbound connections use FIPS-compliant TLS.
 
 
 ### Operator Runtime Listener Verification
@@ -2290,7 +1886,10 @@ E2e coverage: [`test_020011`](../e2e/test_operator_fips.py#L200).
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.Listeners
 version: 1.0
 
-FIPS workload pods (ClickHouse, Keeper, and sidecar containers) SHALL listen only on expected TLS ports. Plaintext service ports (8123, 9000, 2181) SHALL NOT be open when FIPS transport hardening applies. The clickhouse-operator pod network namespace SHALL expose only the expected Prometheus listener ports: `:8888` for metrics-exporter and `:9999` for clickhouse-operator, because both containers share the same pod network namespace.
+FIPS workload pods (ClickHouse, Keeper, and sidecar containers) SHALL listen only on expected TLS ports. 
+Plaintext service ports (8123, 9000, 2181) SHALL NOT be open when FIPS transport hardening applies. 
+The clickhouse-operator pod network namespace SHALL expose only the expected Prometheus listener ports: `:8888` for 
+metrics-exporter and `:9999` for clickhouse-operator, because both containers share the same pod network namespace.
 
 
 ### Operator to Kubernetes API

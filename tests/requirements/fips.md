@@ -60,16 +60,13 @@
         * 6.3.7 [RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RemoteUploadTLS](#rqsrs026clickhouseoperatorfipsdataplanebackupremoteuploadtls)
 * 7 [FIPS Enforcement Mode](#fips-enforcement-mode)
     * 7.1 [Security Coercion](#security-coercion)
-        * 7.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceVerifyStrict](#rqsrs026clickhouseoperatorfipsenforcedcoerceverifystrict)
-        * 7.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceMinVersion13](#rqsrs026clickhouseoperatorfipsenforcedcoerceminversion13)
-        * 7.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.OverrideMinVersion12To13](#rqsrs-026clickhouseoperatorfipsenforcedoverrideminversion12to13)
-        * 7.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceIPCSecure](#rqsrs026clickhouseoperatorfipsenforcedcoerceipcsecure)
-        * 7.1.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig](#rqsrs026clickhouseoperatorfipsenforcedrejectinsecurekubeconfig)
-        * 7.1.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonechi)
-        * 7.1.7 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonezk)
-        * 7.1.8 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion](#rqsrs026clickhouseoperatorfipsenforcedrejectinvalidminversion)
-        * 7.1.9 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper](#rqsrs026clickhouseoperatorfipsenforcedrejectexternalzookeeper)
-        * 7.1.10 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass](#rqsrs026clickhouseoperatorfipsenforcedrejectchkbypass)
+        * 7.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion](#rqsrs026clickhouseoperatorfipsenforcedsecuritycoercion)
+        * 7.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig](#rqsrs026clickhouseoperatorfipsenforcedrejectinsecurekubeconfig)
+        * 7.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonechi)
+        * 7.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK](#rqsrs026clickhouseoperatorfipsenforcedrejectverifynonezk)
+        * 7.1.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion](#rqsrs026clickhouseoperatorfipsenforcedrejectinvalidminversion)
+        * 7.1.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper](#rqsrs026clickhouseoperatorfipsenforcedrejectexternalzookeeper)
+        * 7.1.7 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass](#rqsrs026clickhouseoperatorfipsenforcedrejectchkbypass)
     * 7.2 [Image Policy](#image-policy)
         * 7.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHI](#rqsrs026clickhouseoperatorfipsimagesrequiredrejectchi)
         * 7.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.AcceptCHI](#rqsrs026clickhouseoperatorfipsimagesrequiredacceptchi)
@@ -406,20 +403,16 @@ The sidecar binary SHALL satisfy all of the following:
 * `clickhouse-backup --version` contains `fips` (case-insensitive)
 * When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.TLSConfiguration
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig
 version: 1.0
 
 Deploying a `ClickHouseInstallation` with a FIPS-configured backup sidecar SHALL start `clickhouse-backup` with a FIPS-compliant TLS configuration.
 
-The deployed backup sidecar SHALL only add the following listener ports to the clickhouse pod:
+The deployed backup sidecar SHALL only add the following listener ports to the clickhouse container:
 
 * HTTPS API port 7171 (instead of 7180)
 
 Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
-
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.ClickHouseOverTLS
-version: 1.0
 
 The `clickhouse-backup` sidecar SHALL connect to ClickHouse using secure native TCP with TLS enabled.
 
@@ -434,24 +427,19 @@ version: 1.0
 Uploading backups to remote object storage SHALL use FIPS-compliant TLS communication.
 
 
-
 ### Security Coercion
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceVerifyStrict
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion
 version: 1.0
 
-With `fips.enforced=true`, unset TLS verify SHALL be coerced to Strict for ClickHouse, ZooKeeper/Keeper, and Kubernetes clients.
+When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL coerce unset or relaxed security settings as follows:
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceMinVersion13
-version: 1.0
+* Unset TLS verify SHALL be coerced to Strict for ClickHouse, ZooKeeper/Keeper, and Kubernetes clients.
+* Unset TLS `minVersion` SHALL be coerced to `"1.3"` for the operator's outbound TLS clients (`security.clickhouse.tls`, `security.zookeeper.tls`, and `security.kubernetes.tls`).
+* Explicit `minVersion: "1.2"` for those TLS clients SHALL be coerced to `"1.3"`.
+* Unset IPC mode SHALL be coerced to Secure.
 
-With `fips.enforced=true`, unset TLS minVersion SHALL be coerced to 1.3 for the
-operator's outbound TLS clients.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.OverrideMinVersion12To13
-version: 1.0
-
-When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL coerce `minVersion` to `"1.3"` for `security.clickhouse.tls`, `security.zookeeper.tls`, and `security.kubernetes.tls`, even when those fields are explicitly set to `"1.2"`.
+Example configuration with explicit `minVersion: "1.2"`:
 
 ```yaml
 spec:
@@ -469,42 +457,24 @@ spec:
         minVersion: "1.2"
 ```
 
-After operator configuration normalization, the effective `minVersion` for each component listed above SHALL be `"1.3"`.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.CoerceIPCSecure
-version: 1.0
-
-With `fips.enforced=true`, unset IPC mode SHALL be coerced to Secure.
+After operator configuration normalization, the effective `minVersion` for each TLS client listed above SHALL be `"1.3"`.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig
 version: 1.0
 
 The operator SHALL refuse to start when kubeconfig uses `TLSClientConfig.Insecure=true` under strict/FIPS mode.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneCHI
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs
 version: 1.0
 
-CHI with `clickhouse.tls.verify=None` at CHI spec or cluster level under enforced mode SHALL be rejected with `FIPSValidationFailed`.
+When `security.fips.enforced: "true"` is set in the [ClickHouseOperatorConfiguration], the operator SHALL reject 
+non-compliant CHI and CHK specifications with `FIPSValidationFailed` and SHALL NOT create workload StatefulSets for:
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectVerifyNoneZK
-version: 1.0
-
-CHI with `zookeeper.tls.verify=None` under enforced mode SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInvalidMinVersion
-version: 1.0
-
-CHI with invalid TLS minVersion under enforced mode SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectExternalZookeeper
-version: 1.0
-
-CHI referencing plain external ZooKeeper nodes under enforced mode SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectCHKBypass
-version: 1.0
-
-CHK with TLS verify bypass under enforced mode SHALL be rejected.
+* CHI referencing plain external ZooKeeper nodes, including when `secure` is explicitly set to `"false"`.
+* CHI with `clickhouse.tls.verify=None` at spec or cluster level.
+* CHI with `zookeeper.tls.verify=None`.
+* CHI with invalid `clickhouse.tls.minVersion`.
+* CHK with TLS verify bypass at spec level.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope
 version: 1.0
@@ -514,35 +484,27 @@ They SHALL NOT require ClickHouse Server or ClickHouse Keeper listener endpoints
 
 ### Image Policy
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHI
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS
 version: 1.0
 
-With `security.fips.images.policy=Required`, CHI with non-FIPS image tag SHALL be rejected with `FIPSImagePolicyViolation`.
+With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected with `FIPSImagePolicyViolation` as follows:
+
+* CHI with non-FIPS image tag SHALL be rejected at admission.
+* CHK with non-FIPS Keeper image SHALL be rejected at admission.
+* CHI with multiple non-FIPS hosts SHALL produce a single policy violation error.
+* Digest-only image references SHALL NOT be detected as FIPS at admission.
+* Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
+* CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.AcceptCHI
 version: 1.0
 
 With image policy Required, CHI with FIPS-tagged image SHALL reconcile normally.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectCHK
-version: 1.0
-
-With image policy Required, CHK with non-FIPS Keeper image SHALL be rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RuntimeVersion
-version: 1.0
-
-With image policy Required, host `SELECT version()` lacking `fips` SHALL fail with `FIPSImagePolicyViolation`.
-
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive
 version: 1.0
 
 With permissive image policy, non-FIPS CHI images SHALL reconcile (default).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.ShortCircuit
-version: 1.0
-
-Multiple non-FIPS hosts SHALL produce a single policy violation error.
 
 
 ### Image Tag Detection
@@ -557,25 +519,10 @@ version: 1.0
 
 Image tags containing `altinityfips` SHALL be detected as FIPS.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.DigestOnly
-version: 1.0
-
-Digest-only image references SHALL NOT be detected as FIPS at admission.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.RegistryPath
-version: 1.0
-
-Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
-
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive
 version: 1.0
 
 Image tags such as `25.3.FIPS` or `25.3.Fips` SHALL be detected as FIPS (case-insensitive match on the tag).
-
-
-## Operator External Connections
-
-**Objective:** Verify all **clickhouse-operator** inbound and outbound connections use FIPS-compliant TLS.
 
 
 ### Operator Runtime Listener Verification
