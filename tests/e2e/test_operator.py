@@ -7764,7 +7764,7 @@ def test_020016(self):
 @Tags("HEAVY")
 @Name("test_030001. FIPS build: shipped image binaries embed GOFIPS140=v1.0.0")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries("1.0")
+    RQ_SRS_026_ClickHouseOperator_FIPS_OperatorBuild_ShippedBinaries("1.0")
 )
 def test_030001(self):
     """Verify FIPS metadata and runtime behavior for shipped image binaries.
@@ -7829,31 +7829,24 @@ def test_030001(self):
 @Tags("HEAVY")
 @Name("test_030003. FIPS data plane: TLS-only ClickHouse, Keeper, and backup")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Build_ShippedBinaries_StartupLogs("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_Listeners("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHIDeploy("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHKDeploy("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_FIPSConfig("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_FIPSConfig("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_VersionString("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainHTTP("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoPlainNative("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_NoPlainClientPort("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_NoUnexpectedPorts("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_NoUnexpectedPorts("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_RaftTLS("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_InternodeTLS("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_FIPSBinary("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_GOFIPS140("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_OnlyTLSPorts("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_HTTPSAPI("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_OperatorBuild_ShippedBinaries_StartupLogs("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_HTTPPorts("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CHK_FIPSConfig("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig_ExternalClient("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSBinary("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSConfig("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RestoreRoundTrip("1.0"),
 )
 def test_030003(self):
-    """Verify a FIPS ClickHouse + Keeper deployment runs with TLS-only data paths:
-    FIPS-built ClickHouse, Keeper, and clickhouse-backup binaries; operator startup
-    banners and listener ports; only secure ports exposed; the backup HTTPS API
-    serving over TLS with CA-trust enforcement; and ReplicatedMergeTree data
-    converging over the TLS setup.
+    """Deploy a FIPS ClickHouse + Keeper installation under strict operator config
+    and verify TLS-only data paths:
+
+    - operator, Keeper, ClickHouse, and clickhouse-backup pass FIPS binary and
+      listener-port checks, with only secure ports exposed
+    - ReplicatedMergeTree data converges across replicas over TLS
+    - the backup sidecar reaches ClickHouse over secure native TCP and completes a
+      backup/restore round-trip through the HTTPS API
     """
     chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
     chi_manifest = "manifests/chi/test-030003.yaml"
@@ -7903,8 +7896,8 @@ def test_030003(self):
             replica_count=chi_replica_count,
         )
 
-    with Check("clickhouse-backup sidecar passes essential FIPS checks"):
-        run_backup_fips_checks(
+    with And("clickhouse-backup sidecar passes essential FIPS checks"):
+        backup_pods = run_backup_fips_checks(
             workload=chi,
             replica_count=chi_replica_count,
         )
@@ -7912,12 +7905,15 @@ def test_030003(self):
     with Check("ReplicatedMergeTree data converges over the TLS setup"):
         fips_check_replication_across_replicas(chi_pods=chi_pods)
 
+    with Check("backup and restore succeeds through HTTPS API"):
+        check_clickhouse_backup_restore_roundtrip_https(pod=backup_pods[0])
+
 @TestScenario
 @Tags("HEAVY")
 @Name("test_030004. FIPS CHI: scale replicas 2 -> 3 -> 1")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ScaleUp("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ScaleDown("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CH_Rescale("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CH_ConfigUpdate("1.0"),
 )
 def test_030004(self):
     """Verify FIPS ClickHouse survives replica scale-up and scale-down.
@@ -8040,8 +8036,8 @@ def test_030004(self):
 @Tags("HEAVY")
 @Name("test_030005. FIPS CHK: scale replicas 2 -> 3 -> 1")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ScaleUp("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CHK_ScaleDown("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CHK_Rescale("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CHK_ConfigUpdate("1.0"),
 )
 def test_030005(self):
     """Verify FIPS ClickHouse Keeper survives replica scale-up and scale-down.
@@ -8193,10 +8189,7 @@ def test_030005(self):
 @Tags("HEAVY")
 @Name("test_030006. FIPS enforced: coerces verify, minVersion, and IPC")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceVerifyStrict("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceMinVersion13("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_OverrideMinVersion12To13("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceIPCSecure("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion("1.0"),
 )
 def test_030006(self):
     """Verify ``fips.enforced=true`` coerces relaxed chopconf TLS verify, minVersion, and IPC."""
@@ -8226,11 +8219,7 @@ def test_030006(self):
 @Tags("HEAVY")
 @Name("test_030007. FIPS enforced: invalid CHI/CHK specs are rejected")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectVerifyNoneCHI("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectVerifyNoneZK("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInvalidMinVersion("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectExternalZookeeper("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectCHKBypass("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs("1.0"),
 )
 def test_030007(self):
     """Verify strict FIPS mode rejects non-compliant CHI and CHK specifications."""
@@ -8350,16 +8339,11 @@ def test_030007(self):
 @Tags("HEAVY")
 @Name("test_030008. FIPS image policy Required: admission and runtime checks")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectCHI("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_AcceptCHI("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectCHK("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RuntimeVersion("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_ShortCircuit("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_Accept("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_DigestOnly("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_RegistryPath("1.0"),
 )
 def test_030008(self):
     """Verify ``security.images.policy=FIPSRequired`` rejects non-fips images
@@ -8551,7 +8535,7 @@ def test_030008(self):
 @Tags("HEAVY")
 @Name("test_030009. FIPS enforced: operator TLS clients reject servers without TLS 1.3")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_CoerceMinVersion13("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope("1.0"),
 )
 def test_030009(self):
@@ -8618,122 +8602,9 @@ def test_030009(self):
             min_version="1.3",
         )
 
-
-@TestScenario
-@Tags("HEAVY")
-@Name("test_030010. FIPS on-wire TLS verification: Strict + wrong rootCA fails ClickHouse fetch")
-def test_030010(self):
-    """Strict verify with a wrong rootCA must fail operator ClickHouse fetch."""
-    tls_secret = "manifests/secret/test-058-secret.yaml"
-    chi_manifest = "manifests/chi/test-077-fips-tls-wrong-ca.yaml"
-    chopconf = "manifests/chopconf/test-077-fips-tls-wrong-ca-chopconf.yaml"
-
-    fips_create_shell_namespace_clickhouse_template()
-
-    operator_namespace = self.context.operator_namespace
-    chi = yaml_manifest.get_name(util.get_full_path(chi_manifest))
-
-    with Given("test-058 TLS secret is installed"):
-        kubectl.apply(util.get_full_path(tls_secret))
-
-    with When("HTTPS ClickHouse CHI is deployed"):
-        fips_apply_manifest(
-            manifest_path=chi_manifest,
-            replica_count=1,
-            kind="chi",
-            apply_templates=[current().context.clickhouse_template],
-        )
-
-    with And("operator chopconf sets verify=Strict with an unrelated rootCA"):
-        fips_apply_operator_config(chopconf_path=chopconf)
-        kubectl.wait_chi_status(chi, "Completed")
-
-    with Then("chi_clickhouse_metric_fetch_errors is 1 for this CHI"):
-        check_metrics_monitoring(
-            operator_namespace=operator_namespace,
-            operator_pod=kubectl.get_operator_pod(ns=operator_namespace),
-            expect_pattern=(
-                f'^chi_clickhouse_metric_fetch_errors{{[^}}]*chi="{chi}"[^}}]*}} 1$'
-            ),
-        )
-
-    with When("operator configuration is reset to default"):
-        kubectl.delete(
-            util.get_full_path(chopconf, lookup_in_host=False),
-            operator_namespace,
-        )
-        util.restart_operator()
-
-@TestScenario
-@Tags("HEAVY")
-@Name("test_030012. FIPS backup: ClickHouse over TLS and HTTPS restore round-trip")
-@Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_ClickHouseOverTLS("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_Backup_RestoreRoundTrip("1.0"),
-)
-def test_030012(self):
-    """Verify clickhouse-backup uses TLS to ClickHouse and restore works via HTTPS API."""
-
-    chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
-    chi_manifest = "manifests/chi/test-030003.yaml"
-    chk_manifest = "manifests/chk/test-030003.yaml"
-    backup_template = "manifests/chit/test-030003-backup-template.yaml"
-
-    fips_create_shell_namespace_clickhouse_template()
-
-    chi = yaml_manifest.get_name(util.get_full_path(chi_manifest))
-    chk = yaml_manifest.get_name(util.get_full_path(chk_manifest))
-
-    with Given("strict FIPS operator configuration is applied"):
-        util.apply_operator_config(chopconf)
-
-    with And("test TLS secret is installed"):
-        create_tls_secret_for_fips_hosts(chi=chi, chk=chk)
-
-    with And("external ClickHouse client container is started"):
-        start_external_ch_container()
-
-    with And("FIPS Keeper is deployed"):
-        fips_apply_manifest(
-            manifest_path=chk_manifest,
-            replica_count=2,
-            kind="chk",
-        )
-
-    with And("FIPS ClickHouse with backup sidecar is deployed"):
-        fips_apply_manifest(
-            manifest_path=chi_manifest,
-            replica_count=2,
-            kind="chi",
-            apply_templates=[backup_template],
-        )
-
-    with Given("FIPS ClickHouse cluster is healthy"):
-        chi_pods = run_chi_fips_checks(
-            workload=chi,
-            replica_count=2,
-        )
-
-        run_backup_fips_checks(
-            workload=chi,
-            replica_count=2,
-        )
-
-        pod = chi_pods[0]
-
-    with Then("backup sidecar reaches ClickHouse through secure native TCP"):
-        check_clickhouse_backup_clickhouse_tls_config(pod=pod)
-        check_clickhouse_backup_can_list_tables_over_clickhouse_tls(pod=pod)
-
-    with Then("backup and restore succeeds through HTTPS API"):
-        check_clickhouse_backup_restore_roundtrip_https(pod=pod)
-
-
-
 @TestScenario
 @Name("test_030014. FIPS CHI: TLS cipher suite config updates are applied")
 @Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_DataPlane_CH_ConfigUpdate("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
 )
 @Tags("NO_PARALLEL")

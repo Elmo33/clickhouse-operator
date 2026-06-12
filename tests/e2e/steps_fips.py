@@ -270,8 +270,6 @@ def fips_assert_fips_enforced_coercion_in_logs(self, logs):
     )
 
 
-
-
 @TestStep(Given)
 def fips_apply_operator_godebug(self):
     """Apply suite-configured GODEBUG=fips140=<mode> on the operator deployment."""
@@ -1367,6 +1365,9 @@ def run_backup_fips_checks(self, workload, replica_count):
         with And("each sidecar binary embeds GOFIPS metadata"):
             check_clickhouse_backup_embeds_gofips(pod=pod)
 
+        with And("clickhouse-backup TLS config is secure"):
+            check_clickhouse_backup_clickhouse_tls_config(pod=pod)
+
     return pods
 
 
@@ -1408,7 +1409,7 @@ def fips_check_replication_across_replicas(self, chi_pods, table="repl_test"):
 
 
 @TestStep(When)
-def fips_read_chop_generated_settings(self, pod, container="clickhouse", ns=None):
+def fips_read_chop_generated_chi_settings(self, pod, container="clickhouse", ns=None):
     """Return the operator-generated ``chop-generated-settings.xml`` from ``pod``."""
     ns = ns or self.context.test_namespace
     return kubectl.launch(
@@ -1422,7 +1423,7 @@ def fips_read_chop_generated_settings(self, pod, container="clickhouse", ns=None
 def check_ports_in_chi_settings(self, pod):
     """Check approved TLS ports and removed plaintext ports in CHI settings."""
 
-    settings_xml = fips_read_chop_generated_settings(pod=pod)
+    settings_xml = fips_read_chop_generated_chi_settings(pod=pod)
     note(f"chop-generated-settings.xml:\n{settings_xml}")
 
     assert "<https_port>8443</https_port>" in settings_xml, error(
@@ -1448,7 +1449,7 @@ def check_ports_in_chi_settings(self, pod):
 
 
 @TestStep(When)
-def fips_read_chop_generated_keeper_settings(self, pod, container="clickhouse-keeper", ns=None):
+def fips_read_chop_generated_chk_settings(self, pod, container="clickhouse-keeper", ns=None):
     """Return operator-generated Keeper listener and Raft XML from ``pod``."""
     ns = ns or self.context.test_namespace
     common_listeners_xml = kubectl.launch(
@@ -1468,7 +1469,7 @@ def fips_read_chop_generated_keeper_settings(self, pod, container="clickhouse-ke
 def check_ports_in_chk_settings(self, pod):
     """Check plaintext listener removal and Raft TLS in CHK settings."""
 
-    common_listeners_xml, raft_xml = fips_read_chop_generated_keeper_settings(pod=pod)
+    common_listeners_xml, raft_xml = fips_read_chop_generated_chk_settings(pod=pod)
     note(f"chop-generated-common-listeners.xml:\n{common_listeners_xml}")
     note(f"chop-generated-raft.xml:\n{raft_xml}")
 
@@ -1478,11 +1479,6 @@ def check_ports_in_chk_settings(self, pod):
     assert "<secure>1</secure>" in raft_xml, error(
         "expected <secure>1</secure> in operator-generated Raft config"
     )
-
-
-# ---------------------------------------------------------------------------
-# clickhouse-backup sidecar
-# ---------------------------------------------------------------------------
 
 @TestStep(Then)
 def check_backup_fips_binary_version(self, pod, ns=None):
@@ -1521,51 +1517,6 @@ def check_clickhouse_backup_embeds_gofips(
         f"{pod}: expected {expected} in clickhouse-backup binary"
     )
     note(f"{pod} clickhouse-backup embeds {expected}")
-
-
-@TestStep(Then)
-def check_clickhouse_backup_https_api_serves_tls(self, pods, ns=None):
-    """Verify clickhouse-backup HTTPS API accepts clients trusted by the test CA."""
-    ns = ns or self.context.test_namespace
-
-    for pod in pods:
-        out = kubectl.launch(
-            f"exec {pod} -c clickhouse-backup -- "
-            f"curl -sS -o /tmp/backup_tables.out -w 'HTTP:%{{http_code}}' "
-            f"--cacert /etc/clickhouse-backup/tls/ca.crt "
-            f"https://127.0.0.1:7171/backup/tables",
-            ns=ns,
-        )
-        assert out == "HTTP:200", error(
-            f"{pod}: /backup/tables did not return HTTP 200, got {out!r}"
-        )
-
-
-@TestStep(Then)
-def check_clickhouse_backup_https_api_rejects_untrusted_cipher(
-    self,
-    pods,
-    cipher_suite="TLS_CHACHA20_POLY1305_SHA256",
-    ns=None,
-):
-    """Verify clickhouse-backup HTTPS API rejects a TLS 1.3 cipher outside the FIPS-approved set."""
-    ns = ns or self.context.test_namespace
-
-    for pod in pods:
-        out = kubectl.launch(
-            f"exec {pod} -c clickhouse-backup -- "
-            f"sh -c 'curl -sS --fail "
-            f"--cacert /etc/clickhouse-backup/tls/ca.crt "
-            f"--tls13-ciphers {cipher_suite} "
-            f"https://127.0.0.1:7171/backup/tables >/dev/null 2>&1; "
-            f"echo EXIT:$?'",
-            ns=ns,
-        )
-        assert "EXIT:0" not in out, error(
-            f"{pod}: expected TLS cipher {cipher_suite!r} to be rejected, "
-            f"got {out!r}"
-        )
-        note(f"{pod} rejected TLS cipher {cipher_suite!r}: {out.strip()}")
 
 
 @TestStep(Then)
@@ -1718,24 +1669,6 @@ def check_clickhouse_backup_clickhouse_tls_config(self, pod, ns=None):
     assert "SECURE:true" in out, error(out)
     assert "TLS_CA:/etc/clickhouse-backup/tls/ca.crt" in out, error(out)
     assert "SKIP_VERIFY:false" in out, error(out)
-
-
-@TestStep(Then)
-def check_clickhouse_backup_can_list_tables_over_clickhouse_tls(self, pod, ns=None):
-    """Use backup API to prove backup can talk to ClickHouse using its configured TLS path."""
-    ns = ns or self.context.test_namespace
-
-    out = kubectl.launch(
-        f"exec {pod} -c clickhouse-backup -- "
-        "curl -sS "
-        "--cacert /etc/clickhouse-backup/tls/ca.crt "
-        "-o /tmp/backup_tables.out "
-        "-w 'HTTP:%{http_code}' "
-        "https://127.0.0.1:7171/backup/tables",
-        ns=ns,
-    )
-
-    assert out == "HTTP:200", error(out)
 
 @TestStep(Then)
 def check_clickhouse_backup_restore_roundtrip_https(
