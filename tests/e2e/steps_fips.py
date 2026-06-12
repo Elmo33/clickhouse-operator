@@ -902,6 +902,293 @@ def fips_wait_cluster_topology(
     )
     note(f"{pod} sees {replica_count} hosts in cluster {cluster_name!r}")
 
+
+@TestStep(When)
+def fips_run_openssl_s_client_on_pod_port(
+    self,
+    pod,
+    port,
+    cipher_suite="TLS_AES_128_GCM_SHA256",
+    tls_version="1.3",
+    ok_to_fail=False,
+    ns=None,
+):
+    """Run ``openssl s_client`` against a pod listener through ``kubectl port-forward``."""
+    ns = ns or self.context.test_namespace
+    ca_crt = self.context.tls["ca_crt"]
+    local_port = str(port)
+
+    pf = subprocess.Popen(
+        [
+            "kubectl",
+            "-n", ns,
+            "port-forward",
+            f"pod/{pod}",
+            f"{local_port}:{port}",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if pf.poll() is not None:
+                out, err = pf.communicate()
+                assert False, error(
+                    "kubectl port-forward exited early\n"
+                    f"stdout:\n{out}\n"
+                    f"stderr:\n{err}"
+                )
+
+            try:
+                socket.create_connection(
+                    ("127.0.0.1", int(local_port)), timeout=0.5
+                ).close()
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            assert False, error(
+                f"kubectl port-forward to {pod}:{port} "
+                f"did not become ready on 127.0.0.1:{local_port}"
+            )
+
+        command = [
+            "openssl", "s_client",
+            "-connect", f"127.0.0.1:{local_port}",
+            "-servername", "localhost",
+            "-CAfile", ca_crt,
+            "-verify_return_error",
+        ]
+        if tls_version == "1.3":
+            command.extend(["-tls1_3", "-ciphersuites", cipher_suite])
+        elif tls_version == "1.2":
+            command.append("-tls1_2")
+        elif tls_version == "1.1":
+            command.append("-tls1_1")
+        else:
+            raise ValueError(f"unsupported TLS version: {tls_version}")
+
+        result = subprocess.run(
+            command,
+            input="Q\n",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        output = f"{result.stdout}\n{result.stderr}"
+
+        if not ok_to_fail:
+            assert result.returncode == 0, error(
+                f"{pod}:{port}: openssl s_client failed for {cipher_suite}\n"
+                f"exit code: {result.returncode}\n"
+                f"output:\n{output}"
+            )
+
+        return output
+
+    finally:
+        pf.terminate()
+        try:
+            pf.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pf.kill()
+
+
+@TestStep(When)
+def fips_curl_pod_port(self, pod, port, path="/", ns=None):
+    """Return the HTTP status code from a plain ``curl`` to a pod listener via port-forward."""
+    ns = ns or self.context.test_namespace
+    local_port = str(port)
+
+    pf = subprocess.Popen(
+        [
+            "kubectl",
+            "-n", ns,
+            "port-forward",
+            f"pod/{pod}",
+            f"{local_port}:{port}",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if pf.poll() is not None:
+                out, err = pf.communicate()
+                assert False, error(
+                    "kubectl port-forward exited early\n"
+                    f"stdout:\n{out}\n"
+                    f"stderr:\n{err}"
+                )
+
+            try:
+                socket.create_connection(
+                    ("127.0.0.1", int(local_port)), timeout=0.5
+                ).close()
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            assert False, error(
+                f"kubectl port-forward to {pod}:{port} "
+                f"did not become ready on 127.0.0.1:{local_port}"
+            )
+
+        result = subprocess.run(
+            [
+                "curl", "-sS",
+                "-o", "/dev/null",
+                "-w", "%{http_code}",
+                f"http://127.0.0.1:{local_port}{path}",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, error(
+            f"{pod}:{port}{path}: curl failed\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        return result.stdout.strip()
+
+    finally:
+        pf.terminate()
+        try:
+            pf.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pf.kill()
+
+
+@TestStep(Then)
+def check_chi_ports(self, pod, ns=None):
+    """Per-replica TLS positive/negative probes for ClickHouse HTTPS and native ports."""
+    ns = ns or self.context.test_namespace
+    approved_cipher = "TLS_AES_128_GCM_SHA256"
+    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
+
+    for port in (8443, 9010):
+        with Then(f"{pod}:{port} accepts approved TLS 1.3 cipher"):
+            output = fips_run_openssl_s_client_on_pod_port(
+                pod=pod, port=port, cipher_suite=approved_cipher, ns=ns,
+            )
+            assert f"Cipher is {approved_cipher}" in output, error(
+                f"{pod}:{port}: expected approved cipher negotiation\n{output}"
+            )
+
+        with And(f"{pod}:{port} rejects disapproved TLS 1.3 cipher"):
+            output = fips_run_openssl_s_client_on_pod_port(
+                pod=pod, port=port, cipher_suite=rejected_cipher,
+                ok_to_fail=True, ns=ns,
+            )
+            assert f"Cipher is {rejected_cipher}" not in output, error(
+                f"{pod}:{port}: unexpected negotiation of rejected cipher\n{output}"
+            )
+
+    with And(f"{pod}:9440 accepts approved native TLS query"):
+        out = fips_ch_external_secure_query(pod=pod, sql="SELECT 1")
+        assert out == "1", error(
+            f"{pod}:9440: expected SELECT 1 over native TLS, got {out!r}"
+        )
+
+    with And(f"{pod}:9440 rejects TLS 1.2"):
+        output = fips_run_openssl_s_client_on_pod_port(
+            pod=pod, port=9440, tls_version="1.1", ok_to_fail=True, ns=ns,
+        )
+        assert "This TLS version forbids renegotiation" in output, error(
+            f"{pod}:9440: unexpected TLS 1.1 negotiation\n{output}"
+        )
+
+
+@TestStep(Then)
+def check_chk_ports(self, pod, ns=None):
+    """Per-replica TLS and readiness HTTP probes for ClickHouse Keeper listeners."""
+    ns = ns or self.context.test_namespace
+    approved_cipher = "TLS_AES_128_GCM_SHA256"
+    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
+    port = 2281
+
+    # raft 9444 doesnt communicate over TLS endpoint
+    with Then(f"{pod}:{port} accepts approved TLS 1.3 cipher"):
+        output = fips_run_openssl_s_client_on_pod_port(
+            pod=pod, port=port, cipher_suite=approved_cipher, ns=ns,
+        )
+        assert f"Cipher is {approved_cipher}" in output, error(
+            f"{pod}:{port}: expected approved cipher negotiation\n{output}"
+        )
+
+    with And(f"{pod}:{port} rejects disapproved TLS 1.3 cipher"):
+        output = fips_run_openssl_s_client_on_pod_port(
+            pod=pod, port=port, cipher_suite=rejected_cipher,
+            ok_to_fail=True, ns=ns,
+        )
+        assert f"Cipher is {rejected_cipher}" not in output, error(
+            f"{pod}:{port}: unexpected negotiation of rejected cipher\n{output}"
+        )
+
+    with And(f"{pod}:9182/ready accepts plain HTTP"):
+        code = fips_curl_pod_port(pod=pod, port=9182, path="/ready", ns=ns)
+        assert code == "200", error(
+            f"{pod}:9182/ready: expected HTTP 200, got {code!r}"
+        )
+
+
+@TestStep(Then)
+def check_backup_ports(self, pod, ns=None):
+    """Per-replica TLS positive/negative probes for the clickhouse-backup HTTPS API."""
+    ns = ns or self.context.test_namespace
+    approved_cipher = "TLS_AES_128_GCM_SHA256"
+    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
+
+    with Then(f"{pod}:7171 accepts approved TLS 1.3 cipher"):
+        out = kubectl.launch(
+            f"exec {pod} -c clickhouse-backup -- "
+            f"sh -c 'curl -sS -o /dev/null -w HTTP:%{{http_code}} "
+            f"--cacert /etc/clickhouse-backup/tls/ca.crt "
+            f"--tlsv1.3 --tls13-ciphers {approved_cipher} "
+            f"https://127.0.0.1:7171/backup/tables'",
+            ns=ns,
+        )
+        assert out == "HTTP:200", error(
+            f"{pod}:7171: expected HTTP 200 with approved cipher, got {out!r}"
+        )
+
+    with And(f"{pod}:7171 rejects disapproved TLS 1.3 cipher"):
+        out = kubectl.launch(
+            f"exec {pod} -c clickhouse-backup -- "
+            f"sh -c 'curl -sS --fail "
+            f"--cacert /etc/clickhouse-backup/tls/ca.crt "
+            f"--tls13-ciphers {rejected_cipher} "
+            f"https://127.0.0.1:7171/backup/tables >/dev/null 2>&1; "
+            f"echo EXIT:$?'",
+            ns=ns,
+        )
+        assert "EXIT:0" not in out, error(
+            f"{pod}:7171: expected rejected cipher to fail, got {out!r}"
+        )
+
+
+@TestStep(Then)
+def check_operator_ports(self, ns=None):
+    """Plain HTTP probes for operator Prometheus listener ports."""
+    ns = ns or current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+
+    for port in (9999, 8888):
+        with Then(f"operator pod:{port}/metrics accepts plain HTTP"):
+            code = fips_curl_pod_port(pod=pod, port=port, path="/metrics", ns=ns)
+            assert code == "200", error(
+                f"operator pod:{port}/metrics: expected HTTP 200, got {code!r}"
+            )
+
+
 @TestStep(Then)
 def run_operator_fips_checks(self):
     """
@@ -909,6 +1196,7 @@ def run_operator_fips_checks(self):
 
     * verify the pod network namespace exposes only expected Prometheus ports
     * verify clickhouse-operator and metrics-exporter emit FIPS startup banners
+    * verify metrics ports accept HTTP and reject disapproved TLS handshakes
     """
     ns = current().context.operator_namespace
     pod = kubectl.get_operator_pod(ns=ns)
@@ -937,6 +1225,9 @@ def run_operator_fips_checks(self):
         fips_startup_banner_ok(container="clickhouse-operator", logs=op_logs)
         fips_startup_banner_ok(container="metrics-exporter", logs=me_logs)
 
+    with And("operator metrics ports accept HTTP and reject disapproved TLS"):
+        check_operator_ports(ns=ns)
+
 @TestStep(Then)
 def run_chi_fips_checks(self, workload, replica_count, cluster_name="default"):
     """
@@ -948,6 +1239,7 @@ def run_chi_fips_checks(self, workload, replica_count, cluster_name="default"):
     * verify external TLS connectivity to ClickHouse succeeds
     * verify the server reports a FIPS version string
     * verify operator-generated configuration removes plaintext listeners
+    * verify each listener accepts approved TLS and rejects disapproved TLS
     """
     pods = sorted(kubectl.get_pod_names(workload))
     binary = "clickhouse"
@@ -980,15 +1272,14 @@ def run_chi_fips_checks(self, workload, replica_count, cluster_name="default"):
                 sleep_s=2,
             )
 
+        with And("check TLS port behavior on each replica"):
+            check_chi_ports(pod=pod)
+
+        with And("operator-generated ClickHouse config removes plaintext ports"):
+            check_ports_in_chi_settings(pod=pod)
+
     with Then("check connection via external secure query"):
         check_external_clickhouse_reports_fips_version(pod=pod0)
-        out = fips_ch_external_secure_query(pod=pod0, sql="SELECT 1")
-        assert out == "1", error(f"external secure query failed, got {out!r}")
-
-    with And("operator-generated ClickHouse config removes plaintext ports"):
-        settings_xml = fips_read_chop_generated_settings(pod=pod0)
-        note(f"chop-generated-settings.xml:\n{settings_xml}")
-        check_ports_in_chi_settings(settings_xml=settings_xml)
 
     return pods
 
@@ -1003,6 +1294,7 @@ def run_chk_fips_checks(self, workload, replica_count):
     * verify only approved secure listener ports are exposed
     * verify operator-generated configuration removes plaintext listeners
     * verify Raft inter-node communication is configured for TLS
+    * verify each listener accepts approved TLS and rejects disapproved TLS
     """
     pods = sorted(kubectl.get_chk_pod_names(workload))
     binary = "clickhouse-keeper"
@@ -1027,16 +1319,11 @@ def run_chk_fips_checks(self, workload, replica_count):
                 sleep_s=2,
             )
 
-    with And("operator-generated Keeper config removes plaintext listeners"):
-        common_listeners_xml, raft_xml = fips_read_chop_generated_keeper_settings(
-            chk=workload,
-        )
-        note(f"chop-generated-common-listeners.xml:\n{common_listeners_xml}")
-        note(f"chop-generated-raft.xml:\n{raft_xml}")
-        check_ports_in_chk_settings(
-            common_listeners_xml=common_listeners_xml,
-            raft_xml=raft_xml,
-        )
+        with And("check TLS port behavior on each Keeper node"):
+            check_chk_ports(pod=pod)
+
+        with And("operator-generated Keeper config removes plaintext listeners"):
+            check_ports_in_chk_settings(pod=pod)
 
     return pods
 
@@ -1050,8 +1337,7 @@ def run_backup_fips_checks(self, workload, replica_count):
     * verify clickhouse-backup binaries report a FIPS build
     * verify only approved secure listener ports are exposed
     * verify each sidecar binary embeds GOFIPS metadata
-    * verify the HTTPS API serves over TLS with the test CA
-    * verify the HTTPS API rejects unapproved TLS 1.3 cipher suites
+    * verify the HTTPS API accepts approved TLS and rejects disapproved TLS
     """
     pods = sorted(kubectl.get_pod_names(workload))
     container = "clickhouse-backup"
@@ -1075,14 +1361,11 @@ def run_backup_fips_checks(self, workload, replica_count):
                 sleep_s=2,
             )
 
-    with And("each sidecar binary embeds GOFIPS metadata"):
-        check_clickhouse_backup_embeds_gofips(pods=pods)
+        with Then("check TLS port behavior on each backup sidecar"):
+            check_backup_ports(pod=pod)
 
-    with Then("HTTPS API serves over TLS with the test CA"):
-        check_clickhouse_backup_https_api_serves_tls(pods=pods)
-
-    with And("HTTPS API rejects unapproved TLS cipher suites"):
-        check_clickhouse_backup_https_api_rejects_untrusted_cipher(pods=pods)
+        with And("each sidecar binary embeds GOFIPS metadata"):
+            check_clickhouse_backup_embeds_gofips(pod=pod)
 
     return pods
 
@@ -1136,8 +1419,12 @@ def fips_read_chop_generated_settings(self, pod, container="clickhouse", ns=None
 
 
 @TestStep(Then)
-def check_ports_in_chi_settings(self, settings_xml):
+def check_ports_in_chi_settings(self, pod):
     """Check approved TLS ports and removed plaintext ports in CHI settings."""
+
+    settings_xml = fips_read_chop_generated_settings(pod=pod)
+    note(f"chop-generated-settings.xml:\n{settings_xml}")
+
     assert "<https_port>8443</https_port>" in settings_xml, error(
         "https_port 8443 missing from operator-generated settings"
     )
@@ -1161,20 +1448,30 @@ def check_ports_in_chi_settings(self, settings_xml):
 
 
 @TestStep(When)
-def fips_read_chop_generated_keeper_settings(self, chk, ns=None):
-    """Return operator-generated Keeper listener and Raft XML from the common ConfigMap."""
+def fips_read_chop_generated_keeper_settings(self, pod, container="clickhouse-keeper", ns=None):
+    """Return operator-generated Keeper listener and Raft XML from ``pod``."""
     ns = ns or self.context.test_namespace
-    cm = kubectl.get("configmap", f"chk-{chk}-common-configd", ns=ns)
-    data = cm.get("data", {})
-    return (
-        data.get("chop-generated-common-listeners.xml", ""),
-        data.get("chop-generated-raft.xml", ""),
+    common_listeners_xml = kubectl.launch(
+        f"exec {pod} -c {container} -- "
+        "cat /etc/clickhouse-keeper/keeper_config.d/chop-generated-common-listeners.xml",
+        ns=ns,
     )
+    raft_xml = kubectl.launch(
+        f"exec {pod} -c {container} -- "
+        "cat /etc/clickhouse-keeper/keeper_config.d/chop-generated-raft.xml",
+        ns=ns,
+    )
+    return common_listeners_xml, raft_xml
 
 
 @TestStep(Then)
-def check_ports_in_chk_settings(self, common_listeners_xml, raft_xml):
+def check_ports_in_chk_settings(self, pod):
     """Check plaintext listener removal and Raft TLS in CHK settings."""
+
+    common_listeners_xml, raft_xml = fips_read_chop_generated_keeper_settings(pod=pod)
+    note(f"chop-generated-common-listeners.xml:\n{common_listeners_xml}")
+    note(f"chop-generated-raft.xml:\n{raft_xml}")
+
     assert '<tcp_port remove="1"/>' in common_listeners_xml, error(
         "tcp_port not marked removed in operator-generated Keeper settings"
     )
@@ -1205,7 +1502,7 @@ def check_backup_fips_binary_version(self, pod, ns=None):
 @TestStep(Then)
 def check_clickhouse_backup_embeds_gofips(
     self,
-    pods,
+    pod,
     gofips_version="v1.0.0",
     ns=None,
 ):
@@ -1213,18 +1510,17 @@ def check_clickhouse_backup_embeds_gofips(
     ns = ns or self.context.test_namespace
     expected = f"GOFIPS140={gofips_version}"
 
-    for pod in pods:
-        backup_bin = f"/tmp/{pod}-clickhouse-backup"
-        kubectl.launch(
-            f"cp {pod}:/bin/clickhouse-backup {backup_bin} "
-            f"-c clickhouse-backup",
-            ns=ns,
-        )
-        build_info = kubectl.run_shell(f"go version -m {backup_bin}")
-        assert expected in build_info, error(
-            f"{pod}: expected {expected} in clickhouse-backup binary"
-        )
-        note(f"{pod} clickhouse-backup embeds {expected}")
+    backup_bin = f"/tmp/{pod}-clickhouse-backup"
+    kubectl.launch(
+        f"cp {pod}:/bin/clickhouse-backup {backup_bin} "
+        f"-c clickhouse-backup",
+        ns=ns,
+    )
+    build_info = kubectl.run_shell(f"go version -m {backup_bin}")
+    assert expected in build_info, error(
+        f"{pod}: expected {expected} in clickhouse-backup binary"
+    )
+    note(f"{pod} clickhouse-backup embeds {expected}")
 
 
 @TestStep(Then)
@@ -1664,85 +1960,10 @@ def fips_run_openssl_s_client_for_clickhouse_https(
     ok_to_fail=False,
 ):
     """Run openssl s_client against ClickHouse HTTPS through kubectl port-forward."""
-
-    ns = self.context.test_namespace
-    ca_crt = self.context.tls["ca_crt"]
-    local_port = "8443"
-
-    pf = subprocess.Popen(
-        [
-            "kubectl",
-            "-n",
-            ns,
-            "port-forward",
-            f"pod/{pod}",
-            f"{local_port}:8443",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    return fips_run_openssl_s_client_on_pod_port(
+        pod=pod,
+        port=8443,
+        cipher_suite=cipher_suite,
+        tls_version="1.3",
+        ok_to_fail=ok_to_fail,
     )
-
-    try:
-        deadline = time.time() + 10
-        while time.time() < deadline:
-            if pf.poll() is not None:
-                out, err = pf.communicate()
-                assert False, error(
-                    "kubectl port-forward exited early\n"
-                    f"stdout:\n{out}\n"
-                    f"stderr:\n{err}"
-                )
-
-            try:
-                socket.create_connection(
-                    ("127.0.0.1", int(local_port)),
-                    timeout=0.5,
-                ).close()
-                break
-            except OSError:
-                time.sleep(0.2)
-        else:
-            assert False, error(
-                f"kubectl port-forward to {pod}:8443 "
-                f"did not become ready on 127.0.0.1:{local_port}"
-            )
-
-        result = subprocess.run(
-            [
-                "openssl",
-                "s_client",
-                "-connect",
-                f"127.0.0.1:{local_port}",
-                "-servername",
-                "localhost",
-                "-tls1_3",
-                "-ciphersuites",
-                cipher_suite,
-                "-CAfile",
-                ca_crt,
-                "-verify_return_error",
-            ],
-            input="Q\n",
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        output = f"{result.stdout}\n{result.stderr}"
-
-        if not ok_to_fail:
-            assert result.returncode == 0, error(
-                f"{pod}: openssl s_client failed for {cipher_suite}\n"
-                f"exit code: {result.returncode}\n"
-                f"output:\n{output}"
-            )
-
-        return output
-
-    finally:
-        pf.terminate()
-        try:
-            pf.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            pf.kill()

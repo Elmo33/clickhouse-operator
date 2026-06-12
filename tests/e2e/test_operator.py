@@ -7873,7 +7873,7 @@ def test_030003(self):
     with Check("operator pod passes essential FIPS checks"):
         run_operator_fips_checks()
 
-    with And("test TLS secret is installed"):
+    with When("test TLS secret is installed"):
         create_tls_secret_for_fips_hosts(chi=chi, chk=chk)
 
     with And("external ClickHouse client container is started"):
@@ -7897,13 +7897,13 @@ def test_030003(self):
             apply_templates=[backup_template],
         )
 
-    with Check("ClickHouse cluster passes essential FIPS checks"):
+    with Then("check ClickHouse cluster passes essential FIPS checks"):
         chi_pods = run_chi_fips_checks(
             workload=chi,
             replica_count=chi_replica_count,
         )
 
-    with And("check clickhouse-backup sidecar passes essential FIPS checks"):
+    with Check("clickhouse-backup sidecar passes essential FIPS checks"):
         run_backup_fips_checks(
             workload=chi,
             replica_count=chi_replica_count,
@@ -8009,8 +8009,6 @@ def test_030004(self):
             chi_pods=chi_pods,
             table="repl_scale_test_3",
         )
-
-    # TODO add settings check
 
     with When("CHI is downscaled to 1 replica"):
         chi_manifest_1 = fips_edit_manifest(
