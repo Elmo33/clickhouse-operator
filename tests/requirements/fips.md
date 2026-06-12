@@ -182,25 +182,15 @@ TLS must be enabled for all connections to:
 - ZooKeeper/Keeper
 - Prometheus scrape endpoints
 
-### RQ.SRS-026.ClickHouseOperator.FIPS.Config.ExternalTLS
+### RQ.SRS-026.ClickHouseOperator.FIPS.Config.HTTP
 version: 1.0
 
-Plain HTTP/TCP on external connections SHALL be treated as a configuration error for FIPS compliance. TLS SHALL be enabled for connections to the [Kubernetes API], [ClickHouse Server], [ZooKeeper/Keeper], and Prometheus scrape endpoints.
+All external connections SHALL require TLS with FIPS-compliant settings, except for localhost IPC between the operator
+and metrics-exporter and the Prometheus metrics endpoints: `:9999` and :`8888`.
 
 ## Build Verification
 
-**Objective:** Verify each shipped binary is a FIPS build and linked to Go Cryptographic Module v1.0.0.
-
-**Certificates:**
-- [CMVP #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247)
-- [CAVP A6650](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/details?product=19371)
-
-**Build requirement:** `GOFIPS140=v1.0.0` (or `certified`)
-
-
-### Shipped Binaries
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries
+### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries
 version: 1.0
 
 Each shipped pod binary — `clickhouse-operator` and `metrics-exporter` — SHALL satisfy all of the following:
@@ -229,7 +219,7 @@ Examples:
     enabled: true
   ```
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries.StartupLogs
+### RQ.SRS-026.ClickHouseOperator.FIPS.Build.ShippedBinaries.StartupLogs
 version: 1.0
 
 At startup, each binary SHALL emit a FIPS startup banner in logs indicating build and runtime FIPS state.
@@ -244,8 +234,6 @@ runtime.enforced=true \
 module=v1.0.0
 ```
 
-
-
 ## Approved TLS Cipher Suites
 
 ### RQ.SRS-026.ClickHouseOperator.FIPS.TLS.ApprovedCiphers
@@ -258,166 +246,193 @@ SHALL negotiate only TLS 1.3 with the following approved cipher suites.
 * TLS_AES_256_GCM_SHA384
 * TLS_CHACHA20_POLY1305_SHA256 (not accepted by default, needs to be specified explicitly in all openssl configs)
 
-### Rejected Cipher Suites and Protocols
+Any other cipher suite or protocol version SHALL be rejected by operator in a FIPS-compliant configuration.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.TLS.RejectedCiphers
+
+## ClickHouse Server
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig
 version: 1.0
 
-TLS connections SHALL reject the following for all TLS-enabled external connections:
+Deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.
 
-- Any TLS cipher suite not explicitly listed in [RQ.SRS-026.ClickHouseOperator.FIPS.TLS.ApprovedCiphers](#rqsrs-026clickhouseoperatorfipstlsapprovedciphers)
-- Protocol versions: SSLv2, SSLv3, TLS 1.0, TLS 1.1
-- Cipher suites using non-approved/legacy algorithms (for this profile), including:
-  - ChaCha20-Poly1305
-  - RC4, RC2, DES, 3DES, IDEA, SEED, CAMELLIA, ARIA
-  - NULL encryption / NULL authentication
-  - Anonymous key exchange (`aNULL`, `eNULL`, `ADH`, `AECDH`)
-  - Export/weak suites (`EXP`, `LOW`, `40-bit`, `56-bit`)
-  - MD5- or SHA-1-based legacy suites
+```yaml
+  configuration:
+    clusters:
+      - name: default
+        secure: "yes"
+        insecure: "no"
+        layout:
+          shardsCount: 1
+          replicasCount: 2
+    zookeeper:
+      nodes:
+        - host: chk-test-030003-keeper-0-0
+          port: 2281
+          secure: "yes"
+    settings:
+      http_port: _removed_
+      tcp_port: _removed_
+      interserver_http_port: _removed_
+      mysql_port: _removed_
+      postgresql_port: _removed_
+      https_port: 8443
+      tcp_port_secure: 9440
+      interserver_https_port: 9010
+    files:
+      openssl.xml: |
+        <yandex>
+          <openSSL>
+            <server>
+              <certificateFile>/etc/clickhouse-server/secrets.d/server.crt/clickhouse-certs/server.crt</certificateFile>
+              <privateKeyFile>/etc/clickhouse-server/secrets.d/server.key/clickhouse-certs/server.key</privateKeyFile>
+              <dhParamsFile>/etc/clickhouse-server/secrets.d/dhparam.pem/clickhouse-certs/dhparam.pem</dhParamsFile>
+              <!-- Server-auth TLS only: clients validate this certificate; the server does not require client certificates (not mTLS). -->
+              <verificationMode>none</verificationMode>
+              <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+              <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+            </server>
+            <client>
+              <caConfig>/etc/clickhouse-server/secrets.d/ca.crt/clickhouse-certs/ca.crt</caConfig>
+              <loadDefaultCAFile>false</loadDefaultCAFile>
+              <verificationMode>strict</verificationMode>
+              <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+              <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+            </client>
+          </openSSL>
+        </yandex>
+```
 
+The deployed ClickHouse server SHALL use only the following ports:
 
-## ClickHouse Server and Keeper FIPS Configurations
+* HTTPS API port 8443 (instead of 8123)
+* Secure native TCP port 9440 (instead of 9000)
+* Interserver HTTPS port 9010 (instead of interserver HTTP port 9009)
+* Backup sidecar HTTPS API port 7171 (instead of 7180), when backups are enabled
 
-**Objective:** Verify the operator generates and maintains FIPS-compliant configurations for ClickHouse servers and Keepers.
+Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
 
-
-### ClickHouse Server
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.FIPSConfig
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig.ExternalClient
 version: 1.0
 
-Deploying a CHI with FIPS TLS settings SHALL start ClickHouse with FIPS-compliant TLS configuration.
+External clients connecting to the ClickHouse server SHALL be able to use any enabled TLS protocol version, including TLS 1.2.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHIDeploy
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.Rescale
 version: 1.0
 
-The operator SHALL deploy FIPS `ClickHouseInstallation` resources to `Completed` with Running pods when configuration is valid.
+Adding or removing a replica from a FIPS-configured `ClickHouseInstallation` SHALL reconcile successfully and result in the expected number of running pods.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainHTTP
-version: 1.0
+After rescaling, all replicas SHALL continue to run the FIPS ClickHouse binary and maintain the configured TLS-only OpenSSL settings.
 
-When FIPS transport hardening applies, ClickHouse pods SHALL NOT listen on plain HTTP port 8123; HTTPS port 8443 SHALL be used.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoPlainNative
-version: 1.0
-
-When FIPS transport hardening applies, ClickHouse pods SHALL NOT listen on plain native TCP port 9000; secure native port 9440 SHALL be used.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.NoUnexpectedPorts
-version: 1.0
-
-ClickHouse pods in a FIPS deployment SHALL expose only expected secure listener ports and no additional unexpected ports.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.InternodeTLS
-version: 1.0
-
-ReplicatedMergeTree replicas SHALL communicate over interserver HTTPS (`interserver_https_port`) and data SHALL converge across replicas.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleUp
-version: 1.0
-
-Adding a replica to a FIPS-configured CHI SHALL reconcile to `Completed` and the new replica SHALL run the FIPS ClickHouse binary with TLS-only listeners.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ScaleDown
-version: 1.0
-
-Removing a replica from a FIPS-configured CHI SHALL reconcile to `Completed` and remaining replicas SHALL keep FIPS binary and TLS-only configuration.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.ConfigUpdate
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CH.ConfigUpdate
 version: 1.0
 
 Updating TLS settings on a running CHI SHALL reload ClickHouse with the new FIPS-compliant configuration.
 
 
-### ClickHouse Keeper
+## ClickHouse Keeper
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.FIPSConfig
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig
 version: 1.0
 
-Deploying a CHK with FIPS TLS settings SHALL start Keeper with FIPS-compliant TLS configuration.
+Deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHKDeploy
+```yaml
+  configuration:
+    clusters:
+      - name: keeper
+        secure: "yes"
+        insecure: "no"
+        layout:
+          replicasCount: 2
+    settings:
+      keeper_server/log_storage_path: /var/lib/clickhouse/coordination/log
+      keeper_server/snapshot_storage_path: /var/lib/clickhouse/coordination/snapshots
+      keeper_server/raft_configuration/server/port: 9444
+    files:
+      openssl.xml: |
+        <clickhouse>
+          <openSSL>
+              <server>
+                <certificateFile>/etc/clickhouse-server/secrets.d/server.crt/clickhouse-certs/server.crt</certificateFile>
+                <privateKeyFile>/etc/clickhouse-server/secrets.d/server.key/clickhouse-certs/server.key</privateKeyFile>
+                <!-- Server-auth TLS only: clients validate this certificate; the server does not require client certificates (not mTLS). -->
+                <verificationMode>none</verificationMode>
+                <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+                <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+              </server>
+              <client>
+                <caConfig>/etc/clickhouse-server/secrets.d/ca.crt/clickhouse-certs/ca.crt</caConfig>
+                <loadDefaultCAFile>false</loadDefaultCAFile>
+                <verificationMode>strict</verificationMode>
+                <disableProtocols>sslv2,sslv3,tlsv1,tlsv1_1</disableProtocols>
+                <cipherSuites>TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384</cipherSuites>
+              </client>
+          </openSSL>
+        </clickhouse>
+```
+
+The deployed ClickHouse Keeper cluster SHALL use only the following ports:
+
+* Secure client port 2281 (instead of 2181)
+* Secure Raft communication port 9444
+
+Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.Rescale
 version: 1.0
 
-The operator SHALL deploy FIPS `ClickHouseKeeperInstallation` resources to `Completed` with Running pods when configuration is valid.
+Adding or removing a node from a FIPS-configured `ClickHouseKeeperInstallation` SHALL reconcile successfully and result 
+in the expected number of running pods.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoPlainClientPort
+After rescaling, all Keeper nodes SHALL continue to run the FIPS ClickHouse Keeper binary and maintain the configured 
+TLS-only OpenSSL settings.
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.ConfigUpdate
 version: 1.0
 
-When FIPS transport hardening applies, Keeper pods SHALL NOT listen on plain client port 2181; secure client port 2281 SHALL be used.
+Updating TLS settings on a running CHK SHALL reload ClickHouse with the new FIPS-compliant configuration.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.NoUnexpectedPorts
+
+## ClickHouse Backup Sidecar
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSBinary
 version: 1.0
 
-Keeper pods in a FIPS deployment SHALL expose only expected secure listener ports.
+The `clickhouse-backup` sidecar SHALL run a FIPS-built binary.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.RaftTLS
+The sidecar binary SHALL satisfy all of the following:
+
+* `clickhouse-backup --version` contains `fips` (case-insensitive)
+* When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.TLSConfiguration
 version: 1.0
 
-Keeper Raft communication SHALL use TLS on the configured secure Raft port.
+Deploying a `ClickHouseInstallation` with a FIPS-configured backup sidecar SHALL start `clickhouse-backup` with a FIPS-compliant TLS configuration.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleUp
+The deployed backup sidecar SHALL only add the following listener ports to the clickhouse pod:
+
+* HTTPS API port 7171 (instead of 7180)
+
+Each exposed port SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites.
+
+
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.ClickHouseOverTLS
 version: 1.0
 
-Adding a node to a FIPS-configured Keeper cluster SHALL reconcile to `Completed` and the new node SHALL run the FIPS Keeper binary with TLS-only client and Raft listeners.
+The `clickhouse-backup` sidecar SHALL connect to ClickHouse using secure native TCP with TLS enabled.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ScaleDown
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RestoreRoundTrip
 version: 1.0
 
-Removing a node from a FIPS-configured Keeper cluster SHALL reconcile to `Completed` and remaining nodes SHALL keep FIPS configuration.
+Creating a backup and restoring it through the HTTPS API SHALL succeed over TLS.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CHK.ConfigUpdate
+#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS
 version: 1.0
 
-Updating TLS settings on a running CHK SHALL reload Keeper with the new FIPS-compliant configuration.
+Uploading backups to remote object storage SHALL use FIPS-compliant TLS communication.
 
-
-### ClickHouse Backup Sidecar
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.CH.VersionString
-version: 1.0
-
-A running ClickHouse host under FIPS image policy SHALL report a `version()` string containing `fips` (case-insensitive).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.FIPSBinary
-version: 1.0
-
-The `clickhouse-backup` sidecar SHALL run a FIPS-built binary; `clickhouse-backup --version` SHALL contain `fips` (case-insensitive).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.GOFIPS140
-version: 1.0
-
-When inspectable, the clickhouse-backup sidecar binary SHALL embed `GOFIPS140=v1.0.0` per `go version -m`.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.OnlyTLSPorts
-version: 1.0
-
-The clickhouse-backup sidecar SHALL expose only secure listener ports (including HTTPS API port 7171).
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.HTTPSAPI
-version: 1.0
-
-The clickhouse-backup HTTPS API SHALL serve over TLS with CA-trust enforcement: trusted clients accepted, untrusted clients rejected.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.ClickHouseOverTLS
-version: 1.0
-
-The clickhouse-backup sidecar SHALL reach ClickHouse over secure native TCP.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RestoreRoundTrip
-version: 1.0
-
-Backup and restore through the HTTPS API SHALL succeed over TLS.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.DataPlane.Backup.RemoteUploadTLS
-version: 1.0
-
-Remote backup upload to object storage SHALL use FIPS-approved TLS.
-
-
-## FIPS Enforcement Mode
-
-**Objective:** Verify `security.fips.enforced=true` coerces security settings and rejects non-compliant configurations.
 
 
 ### Security Coercion
