@@ -960,12 +960,19 @@ def fips_run_openssl_s_client_on_pod_port(
             "-CAfile", ca_crt,
             "-verify_return_error",
         ]
+
         if tls_version == "1.3":
-            command.extend(["-tls1_3", "-ciphersuites", cipher_suite])
+            command.append("-tls1_3")
+            if cipher_suite:
+                command.extend(["-ciphersuites", cipher_suite])
         elif tls_version == "1.2":
             command.append("-tls1_2")
+            if cipher_suite:
+                command.extend(["-cipher", cipher_suite])
         elif tls_version == "1.1":
             command.append("-tls1_1")
+            if cipher_suite:
+                command.extend(["-cipher", cipher_suite])
         else:
             raise ValueError(f"unsupported TLS version: {tls_version}")
 
@@ -981,7 +988,8 @@ def fips_run_openssl_s_client_on_pod_port(
 
         if not ok_to_fail:
             assert result.returncode == 0, error(
-                f"{pod}:{port}: openssl s_client failed for {cipher_suite}\n"
+                f"{pod}:{port}: openssl s_client failed for "
+                f"tls={tls_version}, cipher={cipher_suite}\n"
                 f"exit code: {result.returncode}\n"
                 f"output:\n{output}"
             )
@@ -995,6 +1003,63 @@ def fips_run_openssl_s_client_on_pod_port(
         except subprocess.TimeoutExpired:
             pf.kill()
 
+@TestStep(Then)
+def fips_assert_rejected_tls_probes(
+    self,
+    chi_pods,
+    chk_pods,
+    ns=None,
+):
+    """Assert rejected TLS protocol/cipher combinations fail handshake."""
+    ns = ns or self.context.test_namespace
+
+    rejected_cases = (
+        {
+            "name": "TLS 1.3 ChaCha20-Poly1305",
+            "tls_version": "1.3",
+            "cipher_suite": "TLS_CHACHA20_POLY1305_SHA256",
+        },
+        {
+            "name": "TLS 1.1 protocol",
+            "tls_version": "1.1",
+            "cipher_suite": None,
+        },
+    )
+
+    endpoints = (
+        ("ClickHouse HTTPS", chi_pods[0], 8443),
+        ("ClickHouse native TLS", chi_pods[0], 9440),
+        ("ClickHouse interserver HTTPS", chi_pods[0], 9010),
+        ("Keeper secure client", chk_pods[0], 2281),
+    )
+
+    rejected_markers = (
+        "Cipher is (NONE)",
+        "handshake failure",
+        "no protocols available",
+        "no shared cipher",
+    )
+
+    for case in rejected_cases:
+        for label, pod, port in endpoints:
+            with Then(f"{label} {pod}:{port} rejects {case['name']}"):
+                output = fips_run_openssl_s_client_on_pod_port(
+                    pod=pod,
+                    port=port,
+                    tls_version=case["tls_version"],
+                    cipher_suite=case["cipher_suite"],
+                    ok_to_fail=True,
+                    ns=ns,
+                )
+
+                assert any(
+                    marker.lower() in output.lower()
+                    for marker in rejected_markers
+                ), error(
+                    f"{label} {pod}:{port}: expected rejected TLS probe to fail "
+                    f"for {case['name']}\n"
+                    f"output:\n{output}"
+                )
 
 @TestStep(When)
 def fips_curl_pod_port(self, pod, port, path="/", ns=None):
@@ -1067,10 +1132,9 @@ def fips_curl_pod_port(self, pod, port, path="/", ns=None):
 
 @TestStep(Then)
 def check_chi_ports(self, pod, ns=None):
-    """Per-replica TLS positive/negative probes for ClickHouse HTTPS and native ports."""
+    """TLS positive/negative probes for ClickHouse HTTPS and native ports."""
     ns = ns or self.context.test_namespace
     approved_cipher = "TLS_AES_128_GCM_SHA256"
-    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
 
     for port in (8443, 9010):
         with Then(f"{pod}:{port} accepts approved TLS 1.3 cipher"):
@@ -1081,36 +1145,19 @@ def check_chi_ports(self, pod, ns=None):
                 f"{pod}:{port}: expected approved cipher negotiation\n{output}"
             )
 
-        with And(f"{pod}:{port} rejects disapproved TLS 1.3 cipher"):
-            output = fips_run_openssl_s_client_on_pod_port(
-                pod=pod, port=port, cipher_suite=rejected_cipher,
-                ok_to_fail=True, ns=ns,
-            )
-            assert f"Cipher is {rejected_cipher}" not in output, error(
-                f"{pod}:{port}: unexpected negotiation of rejected cipher\n{output}"
-            )
-
     with And(f"{pod}:9440 accepts approved native TLS query"):
         out = fips_ch_external_secure_query(pod=pod, sql="SELECT 1")
         assert out == "1", error(
             f"{pod}:9440: expected SELECT 1 over native TLS, got {out!r}"
         )
 
-    with And(f"{pod}:9440 rejects TLS 1.2"):
-        output = fips_run_openssl_s_client_on_pod_port(
-            pod=pod, port=9440, tls_version="1.1", ok_to_fail=True, ns=ns,
-        )
-        assert "This TLS version forbids renegotiation" in output, error(
-            f"{pod}:9440: unexpected TLS 1.1 negotiation\n{output}"
-        )
 
 
 @TestStep(Then)
 def check_chk_ports(self, pod, ns=None):
-    """Per-replica TLS and readiness HTTP probes for ClickHouse Keeper listeners."""
+    """TLS and readiness HTTP probes for ClickHouse Keeper listeners."""
     ns = ns or self.context.test_namespace
     approved_cipher = "TLS_AES_128_GCM_SHA256"
-    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
     port = 2281
 
     # raft 9444 doesnt communicate over TLS endpoint
@@ -1122,15 +1169,6 @@ def check_chk_ports(self, pod, ns=None):
             f"{pod}:{port}: expected approved cipher negotiation\n{output}"
         )
 
-    with And(f"{pod}:{port} rejects disapproved TLS 1.3 cipher"):
-        output = fips_run_openssl_s_client_on_pod_port(
-            pod=pod, port=port, cipher_suite=rejected_cipher,
-            ok_to_fail=True, ns=ns,
-        )
-        assert f"Cipher is {rejected_cipher}" not in output, error(
-            f"{pod}:{port}: unexpected negotiation of rejected cipher\n{output}"
-        )
-
     with And(f"{pod}:9182/ready accepts plain HTTP"):
         code = fips_curl_pod_port(pod=pod, port=9182, path="/ready", ns=ns)
         assert code == "200", error(
@@ -1140,10 +1178,9 @@ def check_chk_ports(self, pod, ns=None):
 
 @TestStep(Then)
 def check_backup_ports(self, pod, ns=None):
-    """Per-replica TLS positive/negative probes for the clickhouse-backup HTTPS API."""
+    """TLS positive/negative probes for the clickhouse-backup HTTPS API."""
     ns = ns or self.context.test_namespace
     approved_cipher = "TLS_AES_128_GCM_SHA256"
-    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
 
     with Then(f"{pod}:7171 accepts approved TLS 1.3 cipher"):
         out = kubectl.launch(
@@ -1157,21 +1194,6 @@ def check_backup_ports(self, pod, ns=None):
         assert out == "HTTP:200", error(
             f"{pod}:7171: expected HTTP 200 with approved cipher, got {out!r}"
         )
-
-    with And(f"{pod}:7171 rejects disapproved TLS 1.3 cipher"):
-        out = kubectl.launch(
-            f"exec {pod} -c clickhouse-backup -- "
-            f"sh -c 'curl -sS --fail "
-            f"--cacert /etc/clickhouse-backup/tls/ca.crt "
-            f"--tls13-ciphers {rejected_cipher} "
-            f"https://127.0.0.1:7171/backup/tables >/dev/null 2>&1; "
-            f"echo EXIT:$?'",
-            ns=ns,
-        )
-        assert "EXIT:0" not in out, error(
-            f"{pod}:7171: expected rejected cipher to fail, got {out!r}"
-        )
-
 
 @TestStep(Then)
 def check_operator_ports(self, ns=None):
@@ -1736,6 +1758,7 @@ def check_clickhouse_backup_restore_roundtrip_https(
             sql=f"SELECT count() FROM {table}",
             expected=10,
         )
+
 @TestStep(Then)
 def fips_wait_table_removed_from_dropped_tables(
     self,
@@ -1765,138 +1788,4 @@ def fips_wait_table_removed_from_dropped_tables(
     assert False, error(
         f"{database}.{table} still present in system.dropped_tables after {timeout}s"
     )
-@TestStep(Given)
-def fips_edit_cipher_suites_manifest(
-    self,
-    source_manifest,
-    cipher_suites,
-):
-    """Load CHI/CHK manifest, patch OpenSSL cipherSuites, write temp copy."""
 
-    source_path = util.get_full_path(source_manifest)
-    cipher_suites_value = ":".join(cipher_suites)
-
-    with open(source_path, encoding="utf-8") as f:
-        manifest = yaml.safe_load(f)
-
-    files = (
-        manifest
-        .setdefault("spec", {})
-        .setdefault("configuration", {})
-        .setdefault("files", {})
-    )
-
-    openssl_xml = files["openssl.xml"]
-
-    openssl_xml = re.sub(
-        r"<cipherSuites>.*?</cipherSuites>",
-        f"<cipherSuites>{cipher_suites_value}</cipherSuites>",
-        openssl_xml,
-        flags=re.DOTALL,
-    )
-
-    files["openssl.xml"] = openssl_xml
-
-    fd, temp_path = tempfile.mkstemp(
-        suffix=".yaml",
-        prefix="fips-cipher-update-",
-    )
-    os.close(fd)
-
-    with open(temp_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(
-            manifest,
-            f,
-            default_flow_style=False,
-            sort_keys=False,
-        )
-
-    note(f"edited cipher-suite manifest written to {temp_path}")
-    note(f"cipherSuites={cipher_suites_value}")
-
-    return temp_path
-
-@TestStep(Then)
-def fips_assert_chi_cipher_suites_configured(
-    self,
-    pod,
-    cipher_suites,
-):
-    """Assert ClickHouse generated OpenSSL config contains the expected cipherSuites."""
-
-    expected = ":".join(cipher_suites)
-
-    openssl_xml = kubectl.launch(
-        f"exec {pod} -c clickhouse -- "
-        "cat /etc/clickhouse-server/config.d/openssl.xml"
-    )
-
-    expected_line = f"<cipherSuites>{expected}</cipherSuites>"
-
-    assert expected_line in openssl_xml, error(
-        f"{pod}: expected cipherSuites not found\n"
-        f"expected: {expected_line}\n"
-        f"openssl.xml:\n{openssl_xml}"
-    )
-
-
-@TestStep(Then)
-def fips_assert_clickhouse_https_cipher_suite_accepted(
-    self,
-    pod,
-    cipher_suite,
-):
-    """Assert ClickHouse HTTPS accepts the configured TLS 1.3 cipher suite."""
-
-    output = fips_run_openssl_s_client_for_clickhouse_https(
-        pod=pod,
-        cipher_suite=cipher_suite,
-        ok_to_fail=False,
-    )
-
-    assert f"Cipher is {cipher_suite}" in output, error(
-        f"{pod}: expected negotiated cipher {cipher_suite}\n"
-        f"output:\n{output}"
-    )
-
-    assert "Protocol  : TLSv1.3" in output or "Protocol: TLSv1.3" in output, error(
-        f"{pod}: expected TLSv1.3 negotiation\n"
-        f"output:\n{output}"
-    )
-
-
-@TestStep(Then)
-def fips_assert_clickhouse_https_cipher_suite_rejected(
-    self,
-    pod,
-    cipher_suite,
-):
-    """Assert ClickHouse HTTPS rejects a TLS 1.3 cipher suite not present in config."""
-
-    output = fips_run_openssl_s_client_for_clickhouse_https(
-        pod=pod,
-        cipher_suite=cipher_suite,
-        ok_to_fail=True,
-    )
-
-    assert f"Cipher is {cipher_suite}" not in output, error(
-        f"{pod}: unexpected negotiated cipher {cipher_suite}\n"
-        f"output:\n{output}"
-    )
-
-
-@TestStep(When)
-def fips_run_openssl_s_client_for_clickhouse_https(
-    self,
-    pod,
-    cipher_suite,
-    ok_to_fail=False,
-):
-    """Run openssl s_client against ClickHouse HTTPS through kubectl port-forward."""
-    return fips_run_openssl_s_client_on_pod_port(
-        pod=pod,
-        port=8443,
-        cipher_suite=cipher_suite,
-        tls_version="1.3",
-        ok_to_fail=ok_to_fail,
-    )

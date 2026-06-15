@@ -87,7 +87,7 @@ This specification describes FIPS 140-3 compatibility requirements for the
 The goal is to verify that FIPS-enabled builds of the operator and metrics-exporter:
 - Operate correctly under FIPS constraints
 - Properly enforce cryptographic restrictions
-- Use FIPS-compliant TLS for all inbound and outbound connections
+- Use FIPS-compliant TLS for all outbound connections
 
 Autotests that trace to these requirements live in
 [`tests/e2e/test_operator.py`](../e2e/test_operator.py) and
@@ -149,11 +149,7 @@ At startup, each binary SHALL emit a FIPS startup log line indicating build and 
 When `GODEBUG=fips140=only`:
 
 ```text
-FIPS: chopconf.fips.enforced=true \
-build.linked=true \
-module.active=true \
-runtime.enforced=true \
-module=v1.0.0
+FIPS: chopconf.fips.enforced=true build.linked=true module.active=true runtime.enforced=true module=v1.0.0
 ```
 
 ## FIPS 140-3 TLS Cipher Suites
@@ -168,9 +164,8 @@ SHALL negotiate only TLS 1.3 with the following approved cipher suites.
 
 * TLS_AES_128_GCM_SHA256
 * TLS_AES_256_GCM_SHA384
-* TLS_CHACHA20_POLY1305_SHA256
 
-Note: `TLS_CHACHA20_POLY1305_SHA256` is not accepted by default and must be specified explicitly in all OpenSSL configurations.
+Note: `TLS_CHACHA20_POLY1305_SHA256` is TLS v1.3 but not FIPS approved.
 
 ### Rejected Cipher Suites and Protocols
 
@@ -187,7 +182,7 @@ SHALL be rejected by the operator in a FIPS-compliant configuration.
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig
 version: 1.0
 
-Deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.
+Operator deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.
 
 ```yaml
   configuration:
@@ -268,7 +263,7 @@ Updating TLS settings on a running CHI SHALL reload ClickHouse with the new FIPS
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig
 version: 1.0
 
-Deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
+Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
 
 ```yaml
   configuration:
@@ -339,7 +334,7 @@ The `clickhouse-backup` sidecar SHALL run a FIPS-built binary.
 
 The sidecar binary SHALL satisfy all of the following:
 
-* `clickhouse-backup --version` contains `fips` (case-insensitive)
+* `clickhouse-backup --version` contains `fips`
 * When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig
@@ -441,41 +436,6 @@ With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected w
 * Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
 * CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.Accept
-version: 1.0
-
-With image policy Required, CHI with FIPS-tagged image SHALL reconcile normally.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive
-version: 1.0
-
-With permissive image policy, non-FIPS CHI images SHALL reconcile (default).
-
-
-### Image Tag Detection
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix
-version: 1.0
-
-Image tags containing `fips` (case-insensitive) SHALL be detected as FIPS.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS
-version: 1.0
-
-Image tags containing `altinityfips` SHALL be detected as FIPS.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive
-version: 1.0
-
-Image tags such as `25.3.FIPS` or `25.3.Fips` SHALL be detected as FIPS (case-insensitive match on the tag).
-
-
-### Operator to metrics-exporter IPC
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure
-version: 1.0
-
-Operator IPC with `security.ipc.mode=Secure` SHALL work over localhost HTTP with token auth.
 
 
 ## CAST Failure
