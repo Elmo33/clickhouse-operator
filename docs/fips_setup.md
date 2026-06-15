@@ -14,9 +14,15 @@ knobs and certificate setup are covered in
 The FIPS boundary covers the operator and metrics-exporter binaries only, so a
 few paths stay outside it. The operator-to-metrics-exporter IPC and the
 Prometheus metrics endpoints (operator `:9999`, metrics-exporter
-`:8888/metrics`) remain plain HTTP. TLS is server-authentication only, not
+`:8888/metrics`) remain plain HTTP. 
+
+TLS is server-authentication only, not
 mutual TLS, because the operator has no client-certificate settings for its
 health and version connections to ClickHouse.
+
+The ClickHouse Keeper readiness probe
+endpoint (`:9182` `/ready`, which reflects Raft quorum status) likewise stays unconditionally
+plaintext HTTP regardless of the secure/insecure knobs and is outside the FIPS TLS scope.
 
 ## Shared prerequisites
 
