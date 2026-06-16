@@ -6390,9 +6390,6 @@ def test_010065_0(self):
 @TestScenario
 @Tags("HEAVY")
 @Name("test_010065. FIPS IPC Secure mode: operator↔exporter token-protected channel")
-@Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_IPCSecure("1.0")
-)
 def test_010065(self):
     """Verify clickhouse.security.ipc.mode=Secure activates token-based auth
     on the operator↔metrics-exporter /chi REST channel without breaking the
@@ -7838,7 +7835,13 @@ def test_030001(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSConfig("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RestoreRoundTrip("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0")
+    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KubernetesAPI("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_ClickHouse("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KeeperRestriction("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_ClickHouse_KeeperTLS("1.0"),
 )
 def test_030003(self):
     """Deploy a FIPS ClickHouse + Keeper installation under strict operator config
@@ -7891,6 +7894,15 @@ def test_030003(self):
             kind="chi",
             apply_templates=[backup_template],
         )
+
+    with Check("operator outbound connections to CHI and CHK after reconcile"):
+        run_operator_reconcile_fips_checks()
+
+    with Check("metrics-exporter discovers ClickHouse using HTTPS"):
+        check_metrics_exporter_discovers_clickhouse_https()
+
+    with Check("ClickHouse replicas connect to Keeper using secure client port"):
+        check_clickhouse_uses_secure_keeper_port(chi=chi)
 
     with Then("check ClickHouse cluster passes essential FIPS checks"):
         chi_pods = run_chi_fips_checks(
@@ -8350,11 +8362,6 @@ def test_030007(self):
 @Name("test_030008. FIPS image policy: Required admission/runtime checks and Permissive default")
 @Requirements(
     RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_Accept("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_Images_Permissive("1.0"),
 )
 def test_030008(self):
     """Verify ``security.images.policy=FIPSRequired`` rejects non-fips images
@@ -8632,6 +8639,28 @@ def test_030009(self):
             min_version="1.3",
         )
 
+@TestScenario
+@Tags("HEAVY")
+@Name("test_030015. FIPS CAST failure: operator and exporter binaries")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail("1.0"),
+)
+def test_030015(self):
+    """Verify forced FIPS CAST failure terminates each shipped binary independently."""
+    fips_extract_shipped_binaries()
+
+    with Then("clickhouse-operator terminates with CAST failure"):
+        check_fips_cast_failure(
+            binary_path=self.context.fips_op_bin,
+            binary="clickhouse-operator",
+        )
+
+    with Then("metrics-exporter terminates with CAST failure"):
+        check_fips_cast_failure(
+            binary_path=self.context.fips_me_bin,
+            binary="metrics-exporter",
+        )
 
 def cleanup_chis(self):
     with Given("Cleanup CHIs"):

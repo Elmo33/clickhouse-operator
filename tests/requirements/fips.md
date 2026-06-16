@@ -44,40 +44,39 @@
         * 8.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope](#rqsrs-026clickhouseoperatorfipsenforcedminversionscope)
     * 8.2 [Image Policy](#image-policy)
         * 8.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS](#rqsrs-026clickhouseoperatorfipsimagesrequiredrejectnonfips)
-        * 8.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.Accept](#rqsrs-026clickhouseoperatorfipsimagesrequiredaccept)
-        * 8.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive](#rqsrs-026clickhouseoperatorfipsimagespermissive)
-    * 8.3 [Image Tag Detection](#image-tag-detection)
-        * 8.3.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix](#rqsrs-026clickhouseoperatorfipsimagestagdetectionfipssuffix)
-        * 8.3.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS](#rqsrs-026clickhouseoperatorfipsimagestagdetectionaltinityfips)
-        * 8.3.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive](#rqsrs-026clickhouseoperatorfipsimagestagdetectioncaseinsensitive)
-    * 8.4 [Operator to metrics-exporter IPC](#operator-to-metrics-exporter-ipc)
-        * 8.4.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure](#rqsrs-026clickhouseoperatorfipsconnectoperatoripcsecure)
-* 9 [CAST Failure](#cast-failure)
-    * 9.1 [Operator CAST Failure](#operator-cast-failure)
-        * 9.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
-    * 9.2 [Exporter CAST Failure](#exporter-cast-failure)
-        * 9.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
-* 10 [ACVP Algorithm Validation](#acvp-algorithm-validation)
-    * 10.1 [Operator ACVP Validation](#operator-acvp-validation)
-        * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
-        * 10.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
-        * 10.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
-        * 10.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
-    * 10.2 [Exporter ACVP Validation](#exporter-acvp-validation)
-        * 10.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
-        * 10.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
-        * 10.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
-        * 10.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
-* 11 [Terminology](#terminology)
-    * 11.1 [SRS](#srs)
-    * 11.2 [FIPS 140-3](#fips-140-3)
-    * 11.3 [clickhouse-operator](#clickhouse-operator)
-    * 11.4 [metrics-exporter](#metrics-exporter)
-    * 11.5 [CHI](#chi)
-    * 11.6 [CHK](#chk)
-    * 11.7 [ACVP](#acvp)
-    * 11.8 [CMVP](#cmvp)
-    * 11.9 [CAVP](#cavp)
+* 9 [Runtime Connection Evidence](#runtime-connection-evidence)
+    * 9.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KubernetesAPI](#rqsrs-026clickhouseoperatorfipsconnectoperatorkubernetesapi)
+    * 9.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.KubernetesAPI](#rqsrs-026clickhouseoperatorfipsconnectexporterkubernetesapi)
+    * 9.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse](#rqsrs-026clickhouseoperatorfipsconnectoperatorclickhouse)
+    * 9.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse](#rqsrs-026clickhouseoperatorfipsconnectexporterclickhouse)
+    * 9.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction](#rqsrs-026clickhouseoperatorfipsconnectoperatorkeeperrestriction)
+    * 9.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS](#rqsrs-026clickhouseoperatorfipsconnectclickhousekeepertls)
+* 10 [CAST Failure](#cast-failure)
+    * 10.1 [Operator CAST Failure](#operator-cast-failure)
+        * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
+    * 10.2 [Exporter CAST Failure](#exporter-cast-failure)
+        * 10.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
+* 11 [ACVP Algorithm Validation](#acvp-algorithm-validation)
+    * 11.1 [Operator ACVP Validation](#operator-acvp-validation)
+        * 11.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
+        * 11.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
+        * 11.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
+        * 11.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
+    * 11.2 [Exporter ACVP Validation](#exporter-acvp-validation)
+        * 11.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
+        * 11.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
+        * 11.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
+        * 11.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
+* 12 [Terminology](#terminology)
+    * 12.1 [SRS](#srs)
+    * 12.2 [FIPS 140-3](#fips-140-3)
+    * 12.3 [clickhouse-operator](#clickhouse-operator)
+    * 12.4 [metrics-exporter](#metrics-exporter)
+    * 12.5 [CHI](#chi)
+    * 12.6 [CHK](#chk)
+    * 12.7 [ACVP](#acvp)
+    * 12.8 [CMVP](#cmvp)
+    * 12.9 [CAVP](#cavp)
 
 ## Introduction
 
@@ -436,6 +435,40 @@ With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected w
 * Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
 * CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
 
+## Runtime Connection Evidence
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KubernetesAPI
+version: 1.0
+
+The clickhouse-operator SHALL access the Kubernetes API through the HTTPS endpoint on port `443`.
+Plain HTTP requests to the Kubernetes API endpoint SHALL be rejected.
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.KubernetesAPI
+version: 1.0
+
+The metrics-exporter SHALL access the Kubernetes API through the HTTPS endpoint on port `443`.
+Plain HTTP requests to the Kubernetes API endpoint SHALL be rejected.
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse
+version: 1.0
+
+The clickhouse-operator SHALL communicate with ClickHouse hosts using HTTPS port `8443`.
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse
+version: 1.0
+
+The metrics-exporter SHALL discover ClickHouse hosts using the HTTPS endpoint `8443`.
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction
+version: 1.0
+
+When a Keeper ensemble is configured as TLS-only, the clickhouse-operator SHALL NOT attempt plaintext ZooKeeper/Keeper
+operations against it.
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS
+version: 1.0
+
+ClickHouse replicas SHALL connect to Keeper using secure client port `2281` with `secure=yes`.
 
 
 ## CAST Failure

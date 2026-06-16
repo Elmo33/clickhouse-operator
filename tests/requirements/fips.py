@@ -1,6 +1,6 @@
 # These requirements were auto generated
 # from software requirements specification (SRS)
-# document by TestFlows v2.0.240813.1212956.
+# document by TestFlows v2.0.231215.1221232.
 # Do not edit by hand but re-generate instead
 # using 'tfs requirements generate' command.
 from testflows.core import Specification
@@ -78,11 +78,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_OperatorBuild_ShippedBinaries_StartupLogs = R
         'When `GODEBUG=fips140=only`:\n'
         '\n'
         '```text\n'
-        'FIPS: chopconf.fips.enforced=true \\\n'
-        'build.linked=true \\\n'
-        'module.active=true \\\n'
-        'runtime.enforced=true \\\n'
-        'module=v1.0.0\n'
+        'FIPS: chopconf.fips.enforced=true build.linked=true module.active=true runtime.enforced=true module=v1.0.0\n'
         '```\n'
         '\n'
     ),
@@ -104,9 +100,8 @@ RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers = Requirement(
         '\n'
         '* TLS_AES_128_GCM_SHA256\n'
         '* TLS_AES_256_GCM_SHA384\n'
-        '* TLS_CHACHA20_POLY1305_SHA256\n'
         '\n'
-        'Note: `TLS_CHACHA20_POLY1305_SHA256` is not accepted by default and must be specified explicitly in all OpenSSL configurations.\n'
+        'Note: `TLS_CHACHA20_POLY1305_SHA256` is TLS v1.3 but not FIPS approved.\n'
         '\n'
     ),
     link=None,
@@ -141,7 +136,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CH_FIPSConfig = Requirement(
     type=None,
     uid=None,
     description=(
-        'Deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.\n'
+        'Operator deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.\n'
         '\n'
         '```yaml\n'
         '  configuration:\n'
@@ -264,7 +259,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CHK_FIPSConfig = Requirement(
     type=None,
     uid=None,
     description=(
-        'Deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.\n'
+        'Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.\n'
         '\n'
         '```yaml\n'
         '  configuration:\n'
@@ -366,7 +361,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSBinary = Requirement(
         '\n'
         'The sidecar binary SHALL satisfy all of the following:\n'
         '\n'
-        '* `clickhouse-backup --version` contains `fips` (case-insensitive)\n'
+        '* `clickhouse-backup --version` contains `fips`\n'
         '* When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`\n'
         '\n'
     ),
@@ -554,103 +549,104 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS = Requirement(
     num='8.2.1'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_Accept = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.Accept',
+RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KubernetesAPI = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KubernetesAPI',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'With image policy Required, CHI with FIPS-tagged image SHALL reconcile normally.\n'
+        'The clickhouse-operator SHALL access the Kubernetes API through the HTTPS endpoint on port `443`.\n'
+        'Plain HTTP requests to the Kubernetes API endpoint SHALL be rejected.\n'
         '\n'
     ),
     link=None,
-    level=3,
-    num='8.2.2'
+    level=2,
+    num='9.1'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_Permissive = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive',
+RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.KubernetesAPI',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'With permissive image policy, non-FIPS CHI images SHALL reconcile (default).\n'
-        '\n'
+        'The metrics-exporter SHALL access the Kubernetes API through the HTTPS endpoint on port `443`.\n'
+        'Plain HTTP requests to the Kubernetes API endpoint SHALL be rejected.\n'
         '\n'
     ),
     link=None,
-    level=3,
-    num='8.2.3'
+    level=2,
+    num='9.2'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix',
+RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_ClickHouse = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'Image tags containing `fips` (case-insensitive) SHALL be detected as FIPS.\n'
+        'The clickhouse-operator SHALL communicate with ClickHouse hosts using HTTPS port `8443`.\n'
         '\n'
     ),
     link=None,
-    level=3,
-    num='8.3.1'
+    level=2,
+    num='9.3'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS',
+RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'Image tags containing `altinityfips` SHALL be detected as FIPS.\n'
+        'The metrics-exporter SHALL discover ClickHouse hosts with HTTPS port `8443` and collect metrics over HTTPS/TLS.\n'
         '\n'
     ),
     link=None,
-    level=3,
-    num='8.3.2'
+    level=2,
+    num='9.4'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive',
+RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KeeperRestriction = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'Image tags such as `25.3.FIPS` or `25.3.Fips` SHALL be detected as FIPS (case-insensitive match on the tag).\n'
-        '\n'
+        'When a Keeper ensemble is configured as TLS-only, the clickhouse-operator SHALL NOT attempt plaintext ZooKeeper/Keeper\n'
+        'operations against it.\n'
         '\n'
     ),
     link=None,
-    level=3,
-    num='8.3.3'
+    level=2,
+    num='9.5'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_IPCSecure = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure',
+RQ_SRS_026_ClickHouseOperator_FIPS_Connect_ClickHouse_KeeperTLS = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        'Operator IPC with `security.ipc.mode=Secure` SHALL work over localhost HTTP with token auth.\n'
+        'ClickHouse replicas SHALL connect to Keeper using secure client port `2281` with `secure=yes`.\n'
         '\n'
         '\n'
     ),
     link=None,
-    level=3,
-    num='8.4.1'
+    level=2,
+    num='9.6'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail = Requirement(
@@ -667,7 +663,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail = Requirement(
     ),
     link=None,
     level=3,
-    num='9.1.1'
+    num='10.1.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail = Requirement(
@@ -684,7 +680,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail = Requirement(
     ),
     link=None,
     level=3,
-    num='9.2.1'
+    num='10.2.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration = Requirement(
@@ -700,7 +696,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration = Requiremen
     ),
     link=None,
     level=3,
-    num='10.1.1'
+    num='11.1.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration = Requirement(
@@ -716,7 +712,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration = Requirement(
     ),
     link=None,
     level=3,
-    num='10.1.2'
+    num='11.1.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ExpectedOutputReplay = Requirement(
@@ -732,7 +728,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ExpectedOutputReplay = Requirem
     ),
     link=None,
     level=3,
-    num='10.1.3'
+    num='11.1.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SuiteCount = Requirement(
@@ -749,7 +745,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SuiteCount = Requirement(
     ),
     link=None,
     level=3,
-    num='10.1.4'
+    num='11.1.4'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration = Requirement(
@@ -765,7 +761,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration = Requiremen
     ),
     link=None,
     level=3,
-    num='10.2.1'
+    num='11.2.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration = Requirement(
@@ -781,7 +777,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration = Requirement(
     ),
     link=None,
     level=3,
-    num='10.2.2'
+    num='11.2.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay = Requirement(
@@ -797,7 +793,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay = Requirem
     ),
     link=None,
     level=3,
-    num='10.2.3'
+    num='11.2.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount = Requirement(
@@ -813,7 +809,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount = Requirement(
     ),
     link=None,
     level=3,
-    num='10.2.4'
+    num='11.2.4'
 )
 
 QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
@@ -866,40 +862,39 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope', level=3, num='8.1.4'),
         Heading(name='Image Policy', level=2, num='8.2'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS', level=3, num='8.2.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.Accept', level=3, num='8.2.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive', level=3, num='8.2.3'),
-        Heading(name='Image Tag Detection', level=2, num='8.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix', level=3, num='8.3.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS', level=3, num='8.3.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive', level=3, num='8.3.3'),
-        Heading(name='Operator to metrics-exporter IPC', level=2, num='8.4'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure', level=3, num='8.4.1'),
-        Heading(name='CAST Failure', level=1, num='9'),
-        Heading(name='Operator CAST Failure', level=2, num='9.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail', level=3, num='9.1.1'),
-        Heading(name='Exporter CAST Failure', level=2, num='9.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail', level=3, num='9.2.1'),
-        Heading(name='ACVP Algorithm Validation', level=1, num='10'),
-        Heading(name='Operator ACVP Validation', level=2, num='10.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration', level=3, num='10.1.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration', level=3, num='10.1.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay', level=3, num='10.1.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount', level=3, num='10.1.4'),
-        Heading(name='Exporter ACVP Validation', level=2, num='10.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration', level=3, num='10.2.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration', level=3, num='10.2.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay', level=3, num='10.2.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount', level=3, num='10.2.4'),
-        Heading(name='Terminology', level=1, num='11'),
-        Heading(name='SRS', level=2, num='11.1'),
-        Heading(name='FIPS 140-3', level=2, num='11.2'),
-        Heading(name='clickhouse-operator', level=2, num='11.3'),
-        Heading(name='metrics-exporter', level=2, num='11.4'),
-        Heading(name='CHI', level=2, num='11.5'),
-        Heading(name='CHK', level=2, num='11.6'),
-        Heading(name='ACVP', level=2, num='11.7'),
-        Heading(name='CMVP', level=2, num='11.8'),
-        Heading(name='CAVP', level=2, num='11.9'),
+        Heading(name='Runtime Connection Evidence', level=1, num='9'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KubernetesAPI', level=2, num='9.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.KubernetesAPI', level=2, num='9.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse', level=2, num='9.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse', level=2, num='9.4'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction', level=2, num='9.5'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS', level=2, num='9.6'),
+        Heading(name='CAST Failure', level=1, num='10'),
+        Heading(name='Operator CAST Failure', level=2, num='10.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail', level=3, num='10.1.1'),
+        Heading(name='Exporter CAST Failure', level=2, num='10.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail', level=3, num='10.2.1'),
+        Heading(name='ACVP Algorithm Validation', level=1, num='11'),
+        Heading(name='Operator ACVP Validation', level=2, num='11.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration', level=3, num='11.1.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration', level=3, num='11.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay', level=3, num='11.1.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount', level=3, num='11.1.4'),
+        Heading(name='Exporter ACVP Validation', level=2, num='11.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration', level=3, num='11.2.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration', level=3, num='11.2.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay', level=3, num='11.2.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount', level=3, num='11.2.4'),
+        Heading(name='Terminology', level=1, num='12'),
+        Heading(name='SRS', level=2, num='12.1'),
+        Heading(name='FIPS 140-3', level=2, num='12.2'),
+        Heading(name='clickhouse-operator', level=2, num='12.3'),
+        Heading(name='metrics-exporter', level=2, num='12.4'),
+        Heading(name='CHI', level=2, num='12.5'),
+        Heading(name='CHK', level=2, num='12.6'),
+        Heading(name='ACVP', level=2, num='12.7'),
+        Heading(name='CMVP', level=2, num='12.8'),
+        Heading(name='CAVP', level=2, num='12.9'),
         ),
     requirements=(
         RQ_SRS_026_ClickHouseOperator_FIPS_HTTPPorts,
@@ -923,12 +918,12 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs,
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_Accept,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_Permissive,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_FIPSSuffix,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_AltinityFIPS,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Images_TagDetection_CaseInsensitive,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_IPCSecure,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KubernetesAPI,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_ClickHouse,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KeeperRestriction,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Connect_ClickHouse_KeeperTLS,
         RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail,
         RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration,
@@ -940,7 +935,7 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount,
         ),
-    content=r'''
+    content='''
 # QA-SRS ClickHouse Operator FIPS 140-3
 # Software Requirements Specification
 
@@ -987,40 +982,39 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         * 8.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope](#rqsrs-026clickhouseoperatorfipsenforcedminversionscope)
     * 8.2 [Image Policy](#image-policy)
         * 8.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS](#rqsrs-026clickhouseoperatorfipsimagesrequiredrejectnonfips)
-        * 8.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.Accept](#rqsrs-026clickhouseoperatorfipsimagesrequiredaccept)
-        * 8.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive](#rqsrs-026clickhouseoperatorfipsimagespermissive)
-    * 8.3 [Image Tag Detection](#image-tag-detection)
-        * 8.3.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix](#rqsrs-026clickhouseoperatorfipsimagestagdetectionfipssuffix)
-        * 8.3.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS](#rqsrs-026clickhouseoperatorfipsimagestagdetectionaltinityfips)
-        * 8.3.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive](#rqsrs-026clickhouseoperatorfipsimagestagdetectioncaseinsensitive)
-    * 8.4 [Operator to metrics-exporter IPC](#operator-to-metrics-exporter-ipc)
-        * 8.4.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure](#rqsrs-026clickhouseoperatorfipsconnectoperatoripcsecure)
-* 9 [CAST Failure](#cast-failure)
-    * 9.1 [Operator CAST Failure](#operator-cast-failure)
-        * 9.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
-    * 9.2 [Exporter CAST Failure](#exporter-cast-failure)
-        * 9.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
-* 10 [ACVP Algorithm Validation](#acvp-algorithm-validation)
-    * 10.1 [Operator ACVP Validation](#operator-acvp-validation)
-        * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
-        * 10.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
-        * 10.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
-        * 10.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
-    * 10.2 [Exporter ACVP Validation](#exporter-acvp-validation)
-        * 10.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
-        * 10.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
-        * 10.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
-        * 10.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
-* 11 [Terminology](#terminology)
-    * 11.1 [SRS](#srs)
-    * 11.2 [FIPS 140-3](#fips-140-3)
-    * 11.3 [clickhouse-operator](#clickhouse-operator)
-    * 11.4 [metrics-exporter](#metrics-exporter)
-    * 11.5 [CHI](#chi)
-    * 11.6 [CHK](#chk)
-    * 11.7 [ACVP](#acvp)
-    * 11.8 [CMVP](#cmvp)
-    * 11.9 [CAVP](#cavp)
+* 9 [Runtime Connection Evidence](#runtime-connection-evidence)
+    * 9.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KubernetesAPI](#rqsrs-026clickhouseoperatorfipsconnectoperatorkubernetesapi)
+    * 9.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.KubernetesAPI](#rqsrs-026clickhouseoperatorfipsconnectexporterkubernetesapi)
+    * 9.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse](#rqsrs-026clickhouseoperatorfipsconnectoperatorclickhouse)
+    * 9.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse](#rqsrs-026clickhouseoperatorfipsconnectexporterclickhouse)
+    * 9.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction](#rqsrs-026clickhouseoperatorfipsconnectoperatorkeeperrestriction)
+    * 9.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS](#rqsrs-026clickhouseoperatorfipsconnectclickhousekeepertls)
+* 10 [CAST Failure](#cast-failure)
+    * 10.1 [Operator CAST Failure](#operator-cast-failure)
+        * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
+    * 10.2 [Exporter CAST Failure](#exporter-cast-failure)
+        * 10.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
+* 11 [ACVP Algorithm Validation](#acvp-algorithm-validation)
+    * 11.1 [Operator ACVP Validation](#operator-acvp-validation)
+        * 11.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
+        * 11.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
+        * 11.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
+        * 11.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
+    * 11.2 [Exporter ACVP Validation](#exporter-acvp-validation)
+        * 11.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
+        * 11.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
+        * 11.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
+        * 11.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
+* 12 [Terminology](#terminology)
+    * 12.1 [SRS](#srs)
+    * 12.2 [FIPS 140-3](#fips-140-3)
+    * 12.3 [clickhouse-operator](#clickhouse-operator)
+    * 12.4 [metrics-exporter](#metrics-exporter)
+    * 12.5 [CHI](#chi)
+    * 12.6 [CHK](#chk)
+    * 12.7 [ACVP](#acvp)
+    * 12.8 [CMVP](#cmvp)
+    * 12.9 [CAVP](#cavp)
 
 ## Introduction
 
@@ -1030,7 +1024,7 @@ This specification describes FIPS 140-3 compatibility requirements for the
 The goal is to verify that FIPS-enabled builds of the operator and metrics-exporter:
 - Operate correctly under FIPS constraints
 - Properly enforce cryptographic restrictions
-- Use FIPS-compliant TLS for all inbound and outbound connections
+- Use FIPS-compliant TLS for all outbound connections
 
 Autotests that trace to these requirements live in
 [`tests/e2e/test_operator.py`](../e2e/test_operator.py) and
@@ -1092,11 +1086,7 @@ At startup, each binary SHALL emit a FIPS startup log line indicating build and 
 When `GODEBUG=fips140=only`:
 
 ```text
-FIPS: chopconf.fips.enforced=true \
-build.linked=true \
-module.active=true \
-runtime.enforced=true \
-module=v1.0.0
+FIPS: chopconf.fips.enforced=true build.linked=true module.active=true runtime.enforced=true module=v1.0.0
 ```
 
 ## FIPS 140-3 TLS Cipher Suites
@@ -1111,9 +1101,8 @@ SHALL negotiate only TLS 1.3 with the following approved cipher suites.
 
 * TLS_AES_128_GCM_SHA256
 * TLS_AES_256_GCM_SHA384
-* TLS_CHACHA20_POLY1305_SHA256
 
-Note: `TLS_CHACHA20_POLY1305_SHA256` is not accepted by default and must be specified explicitly in all OpenSSL configurations.
+Note: `TLS_CHACHA20_POLY1305_SHA256` is TLS v1.3 but not FIPS approved.
 
 ### Rejected Cipher Suites and Protocols
 
@@ -1130,7 +1119,7 @@ SHALL be rejected by the operator in a FIPS-compliant configuration.
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CH.FIPSConfig
 version: 1.0
 
-Deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.
+Operator deploying a `ClickHouseInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse server and client.
 
 ```yaml
   configuration:
@@ -1211,7 +1200,7 @@ Updating TLS settings on a running CHI SHALL reload ClickHouse with the new FIPS
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig
 version: 1.0
 
-Deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
+Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
 
 ```yaml
   configuration:
@@ -1282,7 +1271,7 @@ The `clickhouse-backup` sidecar SHALL run a FIPS-built binary.
 
 The sidecar binary SHALL satisfy all of the following:
 
-* `clickhouse-backup --version` contains `fips` (case-insensitive)
+* `clickhouse-backup --version` contains `fips`
 * When inspectable, `go version -m` reports `GOFIPS140=v1.0.0`
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig
@@ -1384,41 +1373,40 @@ With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected w
 * Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
 * CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.Accept
+## Runtime Connection Evidence
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KubernetesAPI
 version: 1.0
 
-With image policy Required, CHI with FIPS-tagged image SHALL reconcile normally.
+The clickhouse-operator SHALL access the Kubernetes API through the HTTPS endpoint on port `443`.
+Plain HTTP requests to the Kubernetes API endpoint SHALL be rejected.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.Permissive
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.KubernetesAPI
 version: 1.0
 
-With permissive image policy, non-FIPS CHI images SHALL reconcile (default).
+The metrics-exporter SHALL access the Kubernetes API through the HTTPS endpoint on port `443`.
+Plain HTTP requests to the Kubernetes API endpoint SHALL be rejected.
 
-
-### Image Tag Detection
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.FIPSSuffix
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.ClickHouse
 version: 1.0
 
-Image tags containing `fips` (case-insensitive) SHALL be detected as FIPS.
+The clickhouse-operator SHALL communicate with ClickHouse hosts using HTTPS port `8443`.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.AltinityFIPS
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse
 version: 1.0
 
-Image tags containing `altinityfips` SHALL be detected as FIPS.
+The metrics-exporter SHALL discover ClickHouse hosts with HTTPS port `8443` and collect metrics over HTTPS/TLS.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Images.TagDetection.CaseInsensitive
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction
 version: 1.0
 
-Image tags such as `25.3.FIPS` or `25.3.Fips` SHALL be detected as FIPS (case-insensitive match on the tag).
+When a Keeper ensemble is configured as TLS-only, the clickhouse-operator SHALL NOT attempt plaintext ZooKeeper/Keeper
+operations against it.
 
-
-### Operator to metrics-exporter IPC
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.IPCSecure
+### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS
 version: 1.0
 
-Operator IPC with `security.ipc.mode=Secure` SHALL work over localhost HTTP with token auth.
+ClickHouse replicas SHALL connect to Keeper using secure client port `2281` with `secure=yes`.
 
 
 ## CAST Failure

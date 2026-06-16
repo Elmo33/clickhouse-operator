@@ -1196,6 +1196,106 @@ def check_backup_ports(self, pod, ns=None):
         )
 
 @TestStep(Then)
+def check_k8s_api_requires_tls_from_operator_pod(self, ns=None):
+    """Assert Kubernetes API :443 rejects plaintext HTTP from operator pod containers."""
+    ns = ns or current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+
+    for container in ("clickhouse-operator", "metrics-exporter"):
+        with Then(f"{container} cannot use plaintext HTTP to Kubernetes API :443"):
+            out = kubectl.launch(
+                f"exec {pod} -c {container} -- "
+                "curl -skv http://kubernetes.default.svc:443",
+                ns=ns,
+                ok_to_fail=True,
+            )
+
+            assert "Client sent an HTTP request to an HTTPS server" in out, error(
+                f"{container}: expected Kubernetes API :443 to reject plaintext HTTP\n{out}"
+            )
+
+@TestStep(Then)
+def check_operator_clickhouse_tls_logs(self, ns=None):
+    """Assert operator uses HTTPS/TLS config when communicating with ClickHouse."""
+    ns = ns or current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+
+    logs = kubectl.launch(
+        f"logs {pod} -c clickhouse-operator",
+        ns=ns,
+    )
+
+    assert "setupTLSAdvanced():TLS setup OK" in logs, error(
+        "operator did not log ClickHouse TLS setup"
+    )
+    assert "verify=Strict minVersion=1.3" in logs, error(
+        "operator ClickHouse TLS config is not Strict / TLS 1.3"
+    )
+    assert "Ping(https://clickhouse_operator:" in logs, error(
+        "operator did not log HTTPS ClickHouse ping"
+    )
+    assert ":8443?tls_config=" in logs, error(
+        "operator ClickHouse ping did not use HTTPS port 8443 with TLS config"
+    )
+
+@TestStep(Then)
+def check_metrics_exporter_discovers_clickhouse_https(self, ns=None):
+    """Assert metrics-exporter discovers ClickHouse hosts using HTTPS :8443."""
+
+    ns = ns or current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+
+    logs = kubectl.launch(
+        f"logs {pod} -c metrics-exporter --tail=4000",
+        ns=ns,
+    )
+
+    assert '"httpsPort":8443' in logs, error(
+        "metrics-exporter did not discover ClickHouse hosts with httpsPort=8443\n"
+        f"{logs}"
+    )
+
+@TestStep(Then)
+def check_clickhouse_uses_secure_keeper_port(self, chi, ns=None):
+    """Assert ClickHouse replicas use Keeper secure client port 2281 with secure=yes."""
+
+    ns = ns or current().context.test_namespace
+    pods = sorted(kubectl.get_pod_names(chi))
+
+    for pod in pods:
+        with Then(f"{pod} connects to Keeper on secure port 2281"):
+            logs = kubectl.launch(
+                f"logs {pod} -c clickhouse --tail=5000",
+                ns=ns,
+            )
+
+            assert re.search(r"Connected to ZooKeeper at .+:2281\b", logs), error(
+                f"{pod}: ClickHouse did not connect to Keeper on port 2281\n{logs}"
+            )
+
+
+@TestStep(Then)
+def check_operator_skips_plaintext_keeper_dial(self, ns=None):
+    """Assert operator skips plaintext ZK helper when Keeper ensemble is TLS-only."""
+    ns = ns or current().context.operator_namespace
+    pod = kubectl.get_operator_pod(ns=ns)
+
+    logs = kubectl.launch(
+        f"logs {pod} -c clickhouse-operator",
+        ns=ns,
+    )
+
+    assert 'Port:&2281,Secure:&"yes"' in logs, error(
+        "operator logs do not show Keeper configured as secure port 2281"
+    )
+    assert "Skip ZK root-path ensure" in logs, error(
+        "operator did not log skipping ZK root-path ensure"
+    )
+    assert "ensemble is TLS-only and the operator dial is plaintext" in logs, error(
+        "operator did not log that plaintext Keeper dial was skipped for TLS-only ensemble"
+    )
+
+@TestStep(Then)
 def check_operator_ports(self, ns=None):
     """Plain HTTP probes for operator Prometheus listener ports."""
     ns = ns or current().context.operator_namespace
@@ -1245,8 +1345,24 @@ def run_operator_fips_checks(self):
         fips_startup_banner_ok(container="clickhouse-operator", logs=op_logs)
         fips_startup_banner_ok(container="metrics-exporter", logs=me_logs)
 
-    with And("operator metrics ports accept HTTP and reject disapproved TLS"):
+    with Then("operator metrics ports accept HTTP and reject disapproved TLS"):
         check_operator_ports(ns=ns)
+
+    with Then("Kubernetes API port 443 requires TLS from operator pod containers"):
+        check_k8s_api_requires_tls_from_operator_pod(ns=ns)
+
+@TestStep(Then)
+def run_operator_reconcile_fips_checks(self):
+    """Run the fips checks after operator already reconciled CHK and CHI."""
+
+    ns = current().context.operator_namespace
+
+    with Then("operator communicates with ClickHouse over HTTPS/TLS"):
+        check_operator_clickhouse_tls_logs(ns=ns)
+
+    with And("operator skips plaintext Keeper helper against TLS-only Keeper"):
+        check_operator_skips_plaintext_keeper_dial(ns=ns)
+
 
 @TestStep(Then)
 def run_chi_fips_checks(self, workload, replica_count, cluster_name="default"):
@@ -1789,3 +1905,29 @@ def fips_wait_table_removed_from_dropped_tables(
         f"{database}.{table} still present in system.dropped_tables after {timeout}s"
     )
 
+@TestStep(Then)
+def check_fips_cast_failure(self, binary_path, binary, cast_name="HMAC-SHA2-256"):
+    """Assert binary exits non-zero when FIPS CAST is forced to fail."""
+    result = subprocess.run(
+        [
+            "env",
+            f"GODEBUG=fips140=only,failfipscast={cast_name}",
+            binary_path,
+            "--version",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode != 0, error(
+        f"{binary}: expected CAST failure exit, got {result.returncode}\n{output}"
+    )
+    assert f"FIPS 140-3 self-test failed: {cast_name}" in output, error(
+        f"{binary}: expected CAST failure for {cast_name}\n{output}"
+    )
+    assert "simulated CAST failure" in output, error(
+        f"{binary}: expected simulated CAST failure message\n{output}"
+    )
