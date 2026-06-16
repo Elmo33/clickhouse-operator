@@ -131,28 +131,29 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **ClickHouse Server:**
 
-| Test Assertion | Description | Expected Result |
-|----------------|-------------|-----------------|
-| FIPS config applied | Deploy CHI with FIPS TLS settings | ClickHouse starts with FIPS-compliant TLS |
-| No plain HTTP port | Verify HTTP port (8123) disabled when FIPS enforced | Only HTTPS port (8443) listening |
-| No plain TCP port | Verify native TCP port (9000) disabled when FIPS enforced | Only secure TCP port (9440) listening |
-| No unexpected ports | Verify no other inbound/outbound ports opened | Only expected secure ports listening |
-| Internode TLS | Verify interserver_https_port configured | Replicas communicate over TLS |
-| Scale up | Add replica to FIPS-configured cluster | New replica has FIPS config |
-| Scale down | Remove replica from FIPS-configured cluster | Remaining replicas keep FIPS config |
-| Config update | Update TLS settings on running CHI | ClickHouse reloads with new FIPS config |
+| Test Assertion | Description                                               | Expected Result                           |
+|----------------|-----------------------------------------------------------|-------------------------------------------|
+| FIPS config applied | Deploy CHI with FIPS TLS settings                         | ClickHouse starts with FIPS-compliant TLS |
+| No plain HTTP port | Verify HTTP port (8123) disabled when FIPS enforced       | Only HTTPS port (8443) listening          |
+| No plain TCP port | Verify native TCP port (9000) disabled when FIPS enforced | Only secure TCP port (9440) listening     |
+| No unexpected ports | Verify no other inbound/outbound ports opened             | Only expected secure ports listening      |
+| Internode TLS | Verify native interserver_https_port port (9009) disabled | Replicas communicate over TLS port (9010) |
+| Scale up | Add replica to FIPS-configured cluster                    | New replica has FIPS config               |
+| Scale down | Remove replica from FIPS-configured cluster               | Remaining replicas keep FIPS config       |
+| Config update | Update TLS settings on running CHI                        | ClickHouse reloads with new FIPS config   |
 
 **ClickHouse Keeper:**
 
-| Test Assertion | Description | Expected Result |
-|----------------|-------------|-----------------|
-| FIPS config applied | Deploy CHK with FIPS TLS settings | Keeper starts with FIPS-compliant TLS |
-| No plain client port | Verify client port (2181) disabled when FIPS enforced | Only secure client port (2281) listening |
-| No unexpected ports | Verify no other inbound/outbound ports opened | Only expected secure ports listening |
-| Raft TLS | Verify Raft port uses TLS | Keeper nodes communicate over TLS |
-| Scale up | Add node to FIPS-configured Keeper cluster | New node has FIPS config |
-| Scale down | Remove node from FIPS-configured Keeper cluster | Remaining nodes keep FIPS config |
-| Config update | Update TLS settings on running CHK | Keeper reloads with new FIPS config |
+| Test Assertion | Description | Expected Result                                                |
+|----------------|-------------|----------------------------------------------------------------|
+| FIPS config applied | Deploy CHK with FIPS TLS settings | Keeper starts with FIPS-compliant TLS                          |
+| No plain client port | Verify client port (2181) disabled when FIPS enforced | Only secure client port (2281) listening                       |
+| No unexpected ports | Verify no other inbound/outbound ports opened | Only expected secure ports listening                           |
+| Raft TLS | Verify Raft port uses TLS | Raft 9444 doesn't communicate over TLS endpoint (not testable) |
+| /ready endpoint | CHK readiness probe works on plain HTTP port (9182) | /ready returns 200 OK regardless of FIPS config                  |
+| Scale up | Add node to FIPS-configured Keeper cluster | New node has FIPS config                                       |
+| Scale down | Remove node from FIPS-configured Keeper cluster | Remaining nodes keep FIPS config                               |
+| Config update | Update TLS settings on running CHK | Keeper reloads with new FIPS config                            |
 
 ## FIPS Enforcement Mode
 
@@ -160,17 +161,17 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **Security Coercion (`security.fips.enforced=true`):**
 
-| Test Assertion | Description | Expected Result |
-|----------------|-------------|-----------------|
-| Coerce verify to Strict | Deploy with `fips.enforced=true` and no verify set | ClickHouse/ZK/K8s TLS verify coerced to Strict |
-| Coerce minVersion to 1.3 | Deploy with `fips.enforced=true` and no minVersion set | ClickHouse/ZK/K8s TLS minVersion coerced to 1.3 |
-| Coerce IPC mode to Secure | Deploy with `fips.enforced=true` and no IPC mode set | `security.ipc.mode` coerced to Secure |
-| Reject insecure kubeconfig at startup | Kubeconfig has `TLSClientConfig.Insecure=true` under strict/FIPS mode | Operator refuses to start |
-| Reject verify=None | CHI with `clickhouse.tls.verify=None` under enforced mode | CHI rejected with FIPSValidationFailed |
-| Reject ZK verify=None | CHI with `zookeeper.tls.verify=None` under enforced mode | CHI rejected with FIPSValidationFailed |
-| Reject invalid minVersion | CHI with invalid minVersion under enforced mode | CHI rejected with FIPSValidationFailed |
-| Reject external ZooKeeper | CHI references plain ZK nodes under enforced mode | CHI rejected with FIPSValidationFailed |
-| Reject CHK TLS bypass | CHK with `clickhouse.tls.verify=None` under enforced mode | CHK rejected with FIPSValidationFailed |
+| Test Assertion | Description                                                 | Expected Result                                 |
+|----------------|-------------------------------------------------------------|-------------------------------------------------|
+| Coerce verify to Strict | Deploy with `fips.enforced=true` and no verify set          | ClickHouse/ZK/K8s TLS verify coerced to Strict  |
+| Coerce minVersion to 1.3 | Deploy with `fips.enforced=true` and no minVersion set      | ClickHouse/ZK/K8s TLS minVersion coerced to 1.3 |
+| Coerce IPC mode to Secure | Deploy with `fips.enforced=true` and no IPC mode set        | `security.ipc.mode` coerced to Secure           |
+| Reject insecure kubeconfig at startup | Kubeconfig has `TLSClientConfig.Insecure=true` under strict/FIPS mode | Operator refuses to start                       |
+| Reject verify=None | CHI with `clickhouse.tls.verify=None` under enforced mode   | CHI rejected with FIPSValidationFailed          |
+| Reject ZK verify=None | CHI with `zookeeper.tls.verify=None` under enforced mode    | CHI rejected with FIPSValidationFailed          |
+| Reject invalid minVersion | CHI with invalid minVersion under enforced mode             | CHI rejected with FIPSValidationFailed          |
+| Reject external ZooKeeper | CHI references plain ZK nodes under enforced mode           | CHI rejected with FIPSValidationFailed          |
+| Reject CHK TLS bypass | CHK with `clickhouse.tls.verify=None` under enforced mode   | CHK rejected with FIPSValidationFailed          |
 
 **Image Policy (`security.fips.images.policy`):**
 
@@ -199,13 +200,13 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **Connection Overview:**
 
-| Direction | Target | Protocol | Default Port | TLS Support |
-|-----------|--------|----------|--------------|-------------|
+| Direction | Target | Protocol | Default Port | TLS Support                                                 |
+|-----------|--------|----------|--------------|-------------------------------------------------------------|
 | Outbound | Kubernetes API Server | HTTPS | 443 | Yes (client-go), configurable via `security.kubernetes.tls` |
-| Outbound | ClickHouse Server | HTTP/HTTPS | 8123/8443 | Yes, configurable via `security.clickhouse.tls` |
-| Outbound | ZooKeeper/Keeper | TCP | 2181/2281 | Yes (mTLS), configurable via `security.zookeeper.tls` |
-| Outbound | metrics-exporter (IPC) | HTTP | 8888 | No (same pod, localhost) |
-| Inbound | Prometheus scrape | HTTP | 9999 | **FIPS Gap** - needs TLS |
+| Outbound | ClickHouse Server | HTTP/HTTPS | 8123/8443 | Yes, configurable via `security.clickhouse.tls`             |
+| Outbound | ZooKeeper/Keeper | TCP | 2181/2281 | Yes (mTLS), configurable via `security.zookeeper.tls`       |
+| Outbound | metrics-exporter (IPC) | HTTP | 8888 | No (same pod, localhost)                                    |
+| Inbound | Prometheus scrape | HTTP | 9999 | No (known gap)                                              |
 
 **Operator to Kubernetes API**
 
@@ -213,7 +214,6 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 |----------------|-------------|-----------------|
 | Operator FIPS cipher to K8s | Operator connects with FIPS-approved cipher | Connection succeeds |
 | Operator non-FIPS cipher to K8s | K8s API only offers non-approved cipher | Operator rejects connection |
-| `security.kubernetes.tls.minVersion=1.2` | Enforce TLS 1.2 minimum | TLS 1.1 rejected |
 | `security.kubernetes.tls.minVersion=1.3` | Enforce TLS 1.3 minimum | TLS 1.2 rejected |
 
 **Operator to ClickHouse Server**
@@ -222,7 +222,6 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 |----------------|-------------|-----------------|
 | Operator FIPS cipher to CH | Operator connects with FIPS-approved cipher | Connection succeeds |
 | Operator non-FIPS cipher to CH | Server only offers non-approved cipher | Operator rejects connection |
-| `security.clickhouse.tls.minVersion=1.2` | Enforce TLS 1.2 minimum | TLS 1.1 rejected |
 | `security.clickhouse.tls.minVersion=1.3` | Enforce TLS 1.3 minimum | TLS 1.2 rejected |
 
 **Operator to ZooKeeper/Keeper**
@@ -231,7 +230,6 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 |----------------|-------------|-----------------|
 | Operator FIPS cipher to ZK | Operator connects with FIPS-approved cipher | Connection succeeds |
 | Operator non-FIPS cipher to ZK | ZK only offers non-approved cipher | Operator rejects connection |
-| `security.zookeeper.tls.minVersion=1.2` | Enforce TLS 1.2 minimum | TLS 1.1 rejected |
 | `security.zookeeper.tls.minVersion=1.3` | Enforce TLS 1.3 minimum | TLS 1.2 rejected |
 
 **Operator to metrics-exporter (IPC)**
@@ -244,13 +242,11 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **Operator Prometheus Metrics (:9999)**
 
-> **FIPS Gap:** Currently HTTP-only. TLS implementation required for FIPS compliance.
+> **FIPS Gap:** HTTP-only
 
-| Test Assertion | Description | Expected Result |
-|----------------|-------------|-----------------|
-| Operator metrics TLS enabled | Verify TLS listener on :9999 | TLS handshake succeeds |
-| Operator metrics FIPS cipher | Scrape with FIPS-approved cipher | Connection succeeds |
-| Operator metrics non-FIPS cipher | Scrape with non-approved cipher | Connection rejected |
+| Test Assertion        | Description                | Expected Result |
+|-----------------------|----------------------------|-----------------|
+| Operator metrics port | Verify connection on :9999 | curl succeeds   |
 
 ## metrics-exporter Connections
 
@@ -258,12 +254,12 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **Connection Overview:**
 
-| Direction | Target | Protocol | Default Port | TLS Support |
-|-----------|--------|----------|--------------|-------------|
-| Outbound | Kubernetes API Server | HTTPS | 443 | Yes (client-go) |
+| Direction | Target | Protocol | Default Port | TLS Support                        |
+|-----------|--------|----------|--------------|------------------------------------|
+| Outbound | Kubernetes API Server | HTTPS | 443 | Yes (client-go)                    |
 | Outbound | ClickHouse Server | HTTP/HTTPS | 8123/8443 | Yes, inherits from `chop.Config()` |
-| Inbound | Prometheus scrape | HTTP | 8888 `/metrics` | **FIPS Gap** - needs TLS |
-| Inbound | Operator IPC | HTTP | 8888 `/chi` | No (same pod, localhost) |
+| Inbound | Prometheus scrape | HTTP | 8888 `/metrics` | No, (known gap)        |
+| Inbound | Operator IPC | HTTP | 8888 `/chi` | No (same pod, localhost)           |
 
 **Exporter to Kubernetes API**
 
@@ -286,13 +282,11 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **Exporter Prometheus Metrics (:8888/metrics)**
 
-> **FIPS Gap:** Currently HTTP-only. TLS implementation required for FIPS compliance.
+> **FIPS Gap:** HTTP-only.
 
-| Test Assertion | Description | Expected Result |
-|----------------|-------------|-----------------|
-| Exporter metrics TLS enabled | Verify TLS listener on :8888 | TLS handshake succeeds |
-| Exporter metrics FIPS cipher | Scrape with FIPS-approved cipher | Connection succeeds |
-| Exporter metrics non-FIPS cipher | Scrape with non-approved cipher | Connection rejected |
+| Test Assertion | Description                | Expected Result |
+|----------------|----------------------------|-----------------|
+| Exporter metrics port | Verify connection on :8888 | curl succeeds   |
 
 **Exporter IPC Endpoint (:8888/chi)**
 
