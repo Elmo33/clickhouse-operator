@@ -670,7 +670,7 @@ def fips_ch_external_secure_query(self, pod, sql, ns=None):
 # ---------------------------------------------------------------------------
 
 @TestStep(Given)
-def fips_edit_manifest(self, source_manifest, replicas_count=None, kind="chi"):
+def fips_edit_manifest(self, source_manifest, replicas_count=None,  cipher_suites=None, kind="chi"):
     """Load a CHI/CHK manifest, patch ``replicasCount``, write a temp copy."""
     source_path = util.get_full_path(source_manifest)
     with open(source_path, encoding="utf-8") as f:
@@ -679,6 +679,20 @@ def fips_edit_manifest(self, source_manifest, replicas_count=None, kind="chi"):
     if replicas_count is not None:
         manifest["spec"]["configuration"]["clusters"][0]["layout"]["replicasCount"] = (
             replicas_count
+        )
+    if cipher_suites is not None:
+        xml = manifest["spec"]["configuration"]["files"]["openssl.xml"]
+
+        old = (
+            "TLS_AES_128_GCM_SHA256:"
+            "TLS_AES_256_GCM_SHA384"
+        )
+
+        manifest["spec"]["configuration"]["files"]["openssl.xml"] = (
+            xml.replace(
+                old,
+                ":".join(cipher_suites),
+            )
         )
 
     fd, temp_path = tempfile.mkstemp(suffix=".yaml", prefix=f"fips-{kind}-")
@@ -689,6 +703,7 @@ def fips_edit_manifest(self, source_manifest, replicas_count=None, kind="chi"):
     note(f"edited manifest written to {temp_path}")
     if replicas_count is not None:
         note(f"  replicasCount={replicas_count}")
+
 
     return temp_path
 
@@ -1031,6 +1046,7 @@ def fips_assert_rejected_tls_probes(
         ("ClickHouse native TLS", chi_pods[0], 9440),
         ("ClickHouse interserver HTTPS", chi_pods[0], 9010),
         ("Keeper secure client", chk_pods[0], 2281),
+        ("Backup API HTTPS", chi_pods[0], 7171),
     )
 
     rejected_markers = (
@@ -1193,6 +1209,18 @@ def check_backup_ports(self, pod, ns=None):
         )
         assert out == "HTTP:200", error(
             f"{pod}:7171: expected HTTP 200 with approved cipher, got {out!r}"
+        )
+
+    with Then(f"{pod}:7171 rejects plaintext requests"):
+        out = kubectl.launch(
+            f"exec {pod} -c clickhouse-backup -- "
+            f"sh -c 'curl -s -o /dev/null -w %{{http_code}} "
+            f"http://127.0.0.1:7171/backup/tables'",
+            ns=ns,
+            ok_to_fail=True,
+        )
+        assert out != "200", error(
+            f"{pod}:7171: expected plaintext HTTP request to be rejected, got {out!r}"
         )
 
 @TestStep(Then)
@@ -1936,3 +1964,90 @@ def _free_local_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return str(s.getsockname()[1])
+
+
+@TestStep(Then)
+def check_fips_integrity_failure(self, binary_path, binary_label):
+    """Assert binary panics when the .go.fipsinfo HMAC is tampered with."""
+
+    # 1. Find the file offset of the .go.fipsinfo section
+    # Output format example: [18] .go.fipsinfo PROGBITS 0000000000d680a0 d680a0 ...
+    cmd = f"readelf -S -W {shlex.quote(binary_path)}"
+    readelf_out = kubectl.run_shell(cmd)
+
+    match = re.search(r"\.go\.fipsinfo\s+\w+\s+\w+\s+([0-9a-fA-F]+)", readelf_out)
+    assert match, error(f"{binary_label}: .go.fipsinfo section not found in ELF headers")
+
+    section_offset = int(match.group(1), 16)
+    # The HMAC starts 16 bytes into the .go.fipsinfo section (after the magic)
+    hmac_byte_offset = section_offset + 16
+
+    # 2. Create a corrupted copy of the binary
+    corrupted_bin = f"{binary_path}.corrupted"
+    shutil.copy2(binary_path, corrupted_bin)
+
+    with open(corrupted_bin, "rb+") as f:
+        f.seek(hmac_byte_offset)
+        original_byte = f.read(1)
+        # XOR the first byte of the HMAC to corrupt it
+        corrupted_byte = bytes([original_byte[0] ^ 0xFF])
+        f.seek(hmac_byte_offset)
+        f.write(corrupted_byte)
+
+    # 3. Execute corrupted binary and expect panic
+    # We use GODEBUG=fips140=on to ensure the check runs at init
+    result = subprocess.run(
+        [corrupted_bin, "--version"],
+        env={"GODEBUG": "fips140=on"},
+        capture_output=True,
+        text=True,
+        check=False
+    )
+
+    output = f"{result.stdout}\n{result.stderr}"
+    note(output)
+
+    with Then("the process must terminate with a verification mismatch panic"):
+        assert result.returncode != 0, error(
+            f"{binary_label}: tampered binary did not exit with error"
+        )
+        assert "fips140: verification mismatch" in output, error(
+            f"{binary_label}: expected integrity panic not found in output:\n{output}"
+        )
+
+    note(f"{binary_label}: integrity check successfully detected tampering")
+
+@TestStep(Then)
+def check_tls13_cipher_fails(
+    self,
+    pod,
+    port,
+    cipher,
+    target_host="localhost",
+    container=None,
+    ns=None,
+):
+    """Verify a TLS 1.3 cipher cannot be negotiated."""
+
+    ns = ns or self.context.test_namespace
+
+    container_arg = f"-c {container} " if container else ""
+
+    out = kubectl.launch(
+        f"exec {pod} {container_arg}-- "
+        "openssl s_client "
+        f"-connect {target_host}:{port} "
+        "-tls1_3 "
+        f"-ciphersuites {cipher}",
+        ns=ns,
+        ok_to_fail=True,
+    )
+
+    assert (
+        "Cipher is (NONE)" in out
+        or "handshake failure" in out
+        or "alert handshake failure" in out
+        or "no shared cipher" in out
+    ), error(
+        f"{target_host}:{port}: expected {cipher} to be rejected\n{out}"
+    )

@@ -8047,6 +8047,28 @@ def test_030004(self):
             replica_count=1,
         )
 
+    with When("CHI OpenSSL cipher suites are updated"):
+        chi_manifest_update = fips_edit_manifest(
+            source_manifest=chi_manifest,
+            cipher_suites=["TLS_AES_128_GCM_SHA256"],
+            kind="chi",
+        )
+
+        fips_apply_manifest(
+            manifest_path=chi_manifest_update,
+            replica_count=1,
+            kind="chi",
+            apply_templates=[backup_template],
+        )
+
+    with Then("removed ClickHouse cipher is no longer negotiated"):
+        chi_pods = sorted(kubectl.get_pod_names(chi))
+
+        check_tls13_cipher_fails(
+            pod=chi_pods[0],
+            port=9440,
+            cipher="TLS_AES_256_GCM_SHA384",
+        )
 
 
 @TestScenario
@@ -8200,7 +8222,36 @@ def test_030005(self):
             table="repl_chk_scale_test_1",
         )
 
+    with When("CHK OpenSSL cipher suites are updated"):
+        chk_manifest_update = fips_edit_manifest(
+            source_manifest=chk_manifest,
+            replicas_count=1,
+            cipher_suites=["TLS_AES_128_GCM_SHA256"],
+            kind="chk",
+        )
 
+        fips_apply_manifest(
+            manifest_path=chk_manifest_update,
+            replica_count=1,
+            kind="chk",
+        )
+
+    with Then("removed Keeper cipher is no longer negotiated"):
+        chi_pods = sorted(kubectl.get_pod_names(chi))
+        chk_pods = kubectl.get_chk_pod_names(chk)
+
+        chk_ip = kubectl.launch(
+            f"get pod {chk_pods[0]} "
+            "-o jsonpath='{.status.podIP}'",
+            ns=self.context.test_namespace,
+        )
+
+        check_tls13_cipher_fails(
+            pod=chi_pods[0],
+            target_host=chk_ip,
+            port=2281,
+            cipher="TLS_AES_256_GCM_SHA384",
+        )
 
 @TestScenario
 @Tags("HEAVY")
