@@ -18,18 +18,20 @@
 * 7 [FIPS Enforcement Mode](#fips-enforcement-mode)
 * 8 [clickhouse-operator Connections](#clickhouse-operator-connections)
 * 9 [metrics-exporter Connections](#metrics-exporter-connections)
-* 10 [Integrity Check Failure](#integrity-check-failure)
-* 11 [CAST Failure](#cast-failure)
-* 12 [Synthetic TLS Cipher Validation](#synthetic-tls-cipher-validation)
-* 13 [CI/CD Image and Policy Verification](#cicd-image-and-policy-verification)
-* 14 [(Optional) ACVP Algorithm Validation](#optional-acvp-algorithm-validation)
-
+* 10 [clickhouse-backup Sidecar](#clickhouse-backup-sidecar)
+* 11 [Integrity Check Failure](#integrity-check-failure)
+* 12 [CAST Failure](#cast-failure)
+* 13 [Synthetic TLS Cipher Validation](#synthetic-tls-cipher-validation)
+* 14 [CI/CD Image and Policy Verification](#cicd-image-and-policy-verification)
+* 15 [(Optional) ACVP Algorithm Validation](#optional-acvp-algorithm-validation)
 ## Introduction
 
-This test plan covers FIPS 140-3 compatibility testing for the **clickhouse-operator** and
-**metrics-exporter** binaries built with Go FIPS support.
+This test plan covers FIPS 140-3 compatibility testing for the
+**clickhouse-operator**, **metrics-exporter**, and **clickhouse-backup**
+components used within ClickHouse deployments.
 
-The goal is to verify that FIPS-enabled builds of the operator and metrics-exporter:
+The goal is to verify that FIPS-enabled components:
+
 - Operate correctly under FIPS constraints
 - Properly enforce cryptographic restrictions
 - Use FIPS-compliant TLS for all inbound and outbound connections
@@ -58,8 +60,11 @@ flowchart LR
     subgraph ch_cluster["ClickHouse cluster"]
         ch0["CHI pod 0"]
         ch1["CHI pod 1"]
+        backup["clickhouse-backup"]
 
         ch0 <-->|"interserver HTTPS :9010"| ch1
+
+        backup -->|"HTTPS :8443 / native TLS :9440"| ch0
     end
 
     subgraph keeper["ClickHouse Keeper cluster"]
@@ -79,6 +84,7 @@ flowchart LR
 
     %% External access
     ext -->|"native TLS :9440"| ch_cluster
+    ext -->|"HTTPS :7171"| backup
 
     %% Keeper
     ch_cluster -->|"TLS :2281"| keeper
@@ -100,35 +106,23 @@ TLS must be enabled for all connections to:
 - ZooKeeper/Keeper
 - Prometheus scrape endpoints
 
-[//]: # (## Build Verification)
+## Build Verification
 
-[//]: # ()
-[//]: # (**Objective:** Verify binaries are FIPS builds and linked to Go Cryptographic Module v1.0.0.)
+**Objective:** Verify binaries are FIPS builds and linked to Go Cryptographic Module v1.0.0.
 
-[//]: # ()
-[//]: # (**Certificates:**)
+**Certificates:**
+- [CMVP #5247](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247)
+- [CAVP A6650](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/details?product=19371)
 
-[//]: # (- [CMVP #5247]&#40;https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247&#41;)
+**Build requirement:** `GOFIPS140=v1.0.0` (or `certified`)
 
-[//]: # (- [CAVP A6650]&#40;https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/details?product=19371&#41;)
-
-[//]: # ()
-[//]: # (**Build requirement:** `GOFIPS140=v1.0.0` &#40;or `certified`&#41;)
-
-[//]: # ()
-[//]: # (| Test Assertion | Description | Expected Result |)
-
-[//]: # (|----------------|-------------|-----------------|)
-
-[//]: # (| Operator version | Run `clickhouse-operator --version` or check logs | Output includes FIPS indicator |)
-
-[//]: # (| Metrics exporter version | Run `metrics-exporter --version` or check logs | Output includes FIPS indicator |)
-
-[//]: # (| Build flag | Run `go version -m <binary>` | Shows `GOFIPS140=v1.0.0` |)
-
-[//]: # (| FIPS version | Check `crypto/fips140.Version&#40;&#41;` | Returns `v1.0.0` |)
-
-[//]: # (| FIPS enabled | Check `crypto/fips140.Enabled&#40;&#41;` | Returns `true` |)
+| Test Assertion | Description | Expected Result |
+|----------------|-------------|-----------------|
+| Operator version | Run `clickhouse-operator --version` or check logs | Output includes FIPS indicator |
+| Metrics exporter version | Run `metrics-exporter --version` or check logs | Output includes FIPS indicator |
+| Build flag | Run `go version -m <binary>` | Shows `GOFIPS140=v1.0.0` |
+| FIPS version | Check `crypto/fips140.Version()` | Returns `v1.0.0` |
+| FIPS enabled | Check `crypto/fips140.Enabled()` | Returns `true` |
 
 ## GODEBUG Strict Mode Smoke Test
 
@@ -143,157 +137,122 @@ TLS must be enabled for all connections to:
 The following cipher suites are valid for this test plan and apply to all TLS-enabled
 inbound and outbound connections for both clickhouse-operator and metrics-exporter.
 
-[//]: # (### Approved TLS Cipher Suites &#40;Used by Both Clients and Servers&#41;)
+### Approved TLS Cipher Suites (Used by Both Clients and Servers)
 
-[//]: # ()
-[//]: # (**TLS 1.3:**)
 
-[//]: # ()
-[//]: # (| Cipher Suite | OpenSSL Name |)
+**TLS 1.3:**
 
-[//]: # (|--------------|--------------|)
+| Cipher Suite | OpenSSL Name |
+|--------------|--------------|
+| TLS_AES_128_GCM_SHA256 | TLS_AES_128_GCM_SHA256 |
+| TLS_AES_256_GCM_SHA384 | TLS_AES_256_GCM_SHA384 |
 
-[//]: # (| TLS_AES_128_GCM_SHA256 | TLS_AES_128_GCM_SHA256 |)
+**Not valid for this test plan (must be rejected):**
+- Any TLS cipher suite not explicitly listed in the approved TLS 1.3 table above
+- Protocol versions: SSLv2, SSLv3, TLS 1.0, TLS 1.1, TLS 1.2
+- Cipher suites using non-approved/legacy algorithms (for this profile), including:
+  - ChaCha20-Poly1305 (TLS v1.3)
+  - RC4, RC2, DES, 3DES, IDEA, SEED, CAMELLIA, ARIA
+  - NULL encryption / NULL authentication
+  - Anonymous key exchange (`aNULL`, `eNULL`, `ADH`, `AECDH`)
+  - Export/weak suites (`EXP`, `LOW`, `40-bit`, `56-bit`)
+  - MD5- or SHA-1-based legacy suites
 
-[//]: # (| TLS_AES_256_GCM_SHA384 | TLS_AES_256_GCM_SHA384 |)
+## ClickHouse Server and Keeper FIPS Configurations
 
-[//]: # ()
-[//]: # (**Not valid for this test plan &#40;must be rejected&#41;:**)
+**Objective:** Verify operator generates and maintains FIPS-compliant configurations for ClickHouse servers and Keepers.
 
-[//]: # (- Any TLS cipher suite not explicitly listed in the approved TLS 1.3 table above)
+**ClickHouse Server:**
 
-[//]: # (- Protocol versions: SSLv2, SSLv3, TLS 1.0, TLS 1.1, TLS 1.2)
-
-[//]: # (- Cipher suites using non-approved/legacy algorithms &#40;for this profile&#41;, including:)
-
-[//]: # (  - ChaCha20-Poly1305 &#40;TLS v1.3&#41;)
-
-[//]: # (  - RC4, RC2, DES, 3DES, IDEA, SEED, CAMELLIA, ARIA)
-
-[//]: # (  - NULL encryption / NULL authentication)
-
-[//]: # (  - Anonymous key exchange &#40;`aNULL`, `eNULL`, `ADH`, `AECDH`&#41;)
-
-[//]: # (  - Export/weak suites &#40;`EXP`, `LOW`, `40-bit`, `56-bit`&#41;)
-
-[//]: # (  - MD5- or SHA-1-based legacy suites)
-
-[//]: # (## ClickHouse Server and Keeper FIPS Configurations)
-
-[//]: # ()
-[//]: # (**Objective:** Verify operator generates and maintains FIPS-compliant configurations for ClickHouse servers and Keepers.)
-
-[//]: # ()
-[//]: # (**ClickHouse Server:**)
-
-[//]: # ()
-[//]: # (| Test Assertion | Description                                               | Expected Result                           |)
-
-[//]: # (|----------------|-----------------------------------------------------------|-------------------------------------------|)
-
-[//]: # (| FIPS config applied | Deploy CHI with FIPS TLS settings                         | ClickHouse starts with FIPS-compliant TLS |)
-
-[//]: # (| No plain HTTP port | Verify HTTP port &#40;8123&#41; disabled when FIPS enforced       | Only HTTPS port &#40;8443&#41; listening          |)
-
-[//]: # (| No plain TCP port | Verify native TCP port &#40;9000&#41; disabled when FIPS enforced | Only secure TCP port &#40;9440&#41; listening     |)
-
-[//]: # (| No unexpected ports | Verify no other inbound/outbound ports opened             | Only expected secure ports listening      |)
-
-[//]: # (| Internode TLS | Verify native interserver_https_port port &#40;9009&#41; disabled | Replicas communicate over TLS port &#40;9010&#41; |)
-
-[//]: # (| Scale up | Add replica to FIPS-configured cluster                    | New replica has FIPS config               |)
-
-[//]: # (| Scale down | Remove replica from FIPS-configured cluster               | Remaining replicas keep FIPS config       |)
+| Test Assertion | Description                                               | Expected Result                           |
+|----------------|-----------------------------------------------------------|-------------------------------------------|
+| FIPS config applied | Deploy CHI with FIPS TLS settings                         | ClickHouse starts with FIPS-compliant TLS |
+| No plain HTTP port | Verify HTTP port (8123) disabled when FIPS enforced       | Only HTTPS port (8443) listening          |
+| No plain TCP port | Verify native TCP port (9000) disabled when FIPS enforced | Only secure TCP port (9440) listening     |
+| No unexpected ports | Verify no other inbound/outbound ports opened             | Only expected secure ports listening      |
+| Internode TLS | Verify native interserver_https_port port (9009) disabled | Replicas communicate over TLS port (9010) |
+| Scale up | Add replica to FIPS-configured cluster                    | New replica has FIPS config               |
+| Scale down | Remove replica from FIPS-configured cluster               | Remaining replicas keep FIPS config       |
 | Config update | Update TLS settings on running CHI                        | ClickHouse reloads with new FIPS config   |
 
-[//]: # (**ClickHouse Keeper:**)
+**ClickHouse Keeper:**
 
-[//]: # ()
-[//]: # (| Test Assertion | Description | Expected Result                                                |)
-
-[//]: # (|----------------|-------------|----------------------------------------------------------------|)
-
-[//]: # (| FIPS config applied | Deploy CHK with FIPS TLS settings | Keeper starts with FIPS-compliant TLS                          |)
-
-[//]: # (| No plain client port | Verify client port &#40;2181&#41; disabled when FIPS enforced | Only secure client port &#40;2281&#41; listening                       |)
-
-[//]: # (| No unexpected ports | Verify no other inbound/outbound ports opened | Only expected secure ports listening                           |)
-
-[//]: # (| Raft TLS | Verify Raft port uses TLS | Raft 9444 doesn't communicate over TLS endpoint &#40;not testable&#41; |)
-
-[//]: # (| /ready endpoint | CHK readiness probe works on plain HTTP port &#40;9182&#41; | /ready returns 200 OK regardless of FIPS config                  |)
-
-[//]: # (| Scale up | Add node to FIPS-configured Keeper cluster | New node has FIPS config                                       |)
-
-[//]: # (| Scale down | Remove node from FIPS-configured Keeper cluster | Remaining nodes keep FIPS config                               |)
+| Test Assertion | Description | Expected Result                                                |
+|----------------|-------------|----------------------------------------------------------------|
+| FIPS config applied | Deploy CHK with FIPS TLS settings | Keeper starts with FIPS-compliant TLS                          |
+| No plain client port | Verify client port (2181) disabled when FIPS enforced | Only secure client port (2281) listening                       |
+| No unexpected ports | Verify no other inbound/outbound ports opened | Only expected secure ports listening                           |
+| Raft TLS | Verify Raft port uses TLS | Raft 9444 doesn't communicate over TLS endpoint (not testable) |
+| /ready endpoint | CHK readiness probe works on plain HTTP port (9182) | /ready returns 200 OK regardless of FIPS config                  |
+| Scale up | Add node to FIPS-configured Keeper cluster | New node has FIPS config                                       |
+| Scale down | Remove node from FIPS-configured Keeper cluster | Remaining nodes keep FIPS config                               |
 | Config update | Update TLS settings on running CHK | Keeper reloads with new FIPS config                            |
 
-[//]: # (## FIPS Enforcement Mode)
+## clickhouse-backup Sidecar
 
-[//]: # ()
-[//]: # (**Objective:** Verify `security.fips.enforced=true` coerces security settings and rejects non-compliant configurations.)
+**Objective:** Verify clickhouse-backup sidecar operates correctly in FIPS mode and uses FIPS-compliant TLS for ClickHouse backup and restore operations.
 
-[//]: # ()
-[//]: # (**Security Coercion &#40;`security.fips.enforced=true`&#41;:**)
+**Connection Overview:**
 
-[//]: # ()
-[//]: # (| Test Assertion | Description                                                 | Expected Result                                 |)
+| Direction | Target                               | Protocol         | Default Port | TLS Support                    |
+| --------- | ------------------------------------ | ---------------- | ------------ | ------------------------------ |
+| Outbound  | ClickHouse Server                    | HTTPS/native TLS | 8443/9440    | Yes, via ClickHouse TLS config |
+| Inbound   | Backup API                           | HTTPS            | 7171         | Yes                            |
+| Storage   | Local mounted ClickHouse data volume | filesystem       | N/A          | N/A                            |
 
-[//]: # (|----------------|-------------------------------------------------------------|-------------------------------------------------|)
+| Test Assertion               | Description                                                                  | Expected Result                                 |
+| ---------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------- |
+| Backup FIPS binary           | Run `clickhouse-backup --version` in sidecar                                 | Output contains `fips`                          |
+| Backup GOFIPS140 module      | Run `go version -m` against `clickhouse-backup` binary                       | Output contains `GOFIPS140=v1.0.0`              |
+| Backup sidecar starts        | Deploy CHI with clickhouse-backup sidecar and FIPS image policy              | Backup sidecar starts successfully              |
+| Backup only expected ports   | Inspect listening ports in backup sidecar                                    | Only expected secure API port `7171` is exposed |
+| Backup API HTTPS             | Connect to backup API on `7171` with trusted CA                              | HTTPS connection succeeds                       |
+| Backup API rejects plaintext | Send plain HTTP request to backup API port `7171`                            | Request is rejected or TLS handshake fails      |
+| Backup to ClickHouse TLS     | Create backup using ClickHouse secure endpoint                               | Backup completes over TLS                       |
+| Restore to ClickHouse TLS    | Restore backup using ClickHouse secure endpoint                              | Restore completes over TLS                      |
+| Backup round trip            | Create table, insert data, create backup, drop data, restore backup          | Restored data matches original data             |
+| TLS 1.3 approved cipher      | Connect backup API using approved TLS 1.3 AES-GCM cipher                     | Connection succeeds                             |
+| Non-approved TLS rejected    | Try TLS 1.2 or non-approved cipher against backup API                        | Connection is rejected                          |
+| FIPS image policy            | Deploy sidecar with non-FIPS backup image when FIPS image policy is required | CHI is rejected or marked failed                |
 
-[//]: # (| Coerce verify to Strict | Deploy with `fips.enforced=true` and no verify set          | ClickHouse/ZK/K8s TLS verify coerced to Strict  |)
+## FIPS Enforcement Mode
 
-[//]: # (| Coerce minVersion to 1.3 | Deploy with `fips.enforced=true` and no minVersion set      | ClickHouse/ZK/K8s TLS minVersion coerced to 1.3 |)
+**Objective:** Verify `security.fips.enforced=true` coerces security settings and rejects non-compliant configurations.
 
-[//]: # (| Coerce IPC mode to Secure | Deploy with `fips.enforced=true` and no IPC mode set        | `security.ipc.mode` coerced to Secure           |)
+**Security Coercion (`security.fips.enforced=true`):**
 
-[//]: # (| Reject insecure kubeconfig at startup | Kubeconfig has `TLSClientConfig.Insecure=true` under strict/FIPS mode | Operator refuses to start                       |)
+| Test Assertion | Description                                                 | Expected Result                                 |
+|----------------|-------------------------------------------------------------|-------------------------------------------------|
+| Coerce verify to Strict | Deploy with `fips.enforced=true` and no verify set          | ClickHouse/ZK/K8s TLS verify coerced to Strict  |
+| Coerce minVersion to 1.3 | Deploy with `fips.enforced=true` and no minVersion set      | ClickHouse/ZK/K8s TLS minVersion coerced to 1.3 |
+| Coerce IPC mode to Secure | Deploy with `fips.enforced=true` and no IPC mode set        | `security.ipc.mode` coerced to Secure           |
+| Reject insecure kubeconfig at startup | Kubeconfig has `TLSClientConfig.Insecure=true` under strict/FIPS mode | Operator refuses to start                       |
+| Reject verify=None | CHI with `clickhouse.tls.verify=None` under enforced mode   | CHI rejected with FIPSValidationFailed          |
+| Reject ZK verify=None | CHI with `zookeeper.tls.verify=None` under enforced mode    | CHI rejected with FIPSValidationFailed          |
+| Reject invalid minVersion | CHI with invalid minVersion under enforced mode             | CHI rejected with FIPSValidationFailed          |
+| Reject external ZooKeeper | CHI references plain ZK nodes under enforced mode           | CHI rejected with FIPSValidationFailed          |
+| Reject CHK TLS bypass | CHK with `clickhouse.tls.verify=None` under enforced mode   | CHK rejected with FIPSValidationFailed          |
 
-[//]: # (| Reject verify=None | CHI with `clickhouse.tls.verify=None` under enforced mode   | CHI rejected with FIPSValidationFailed          |)
+**Image Policy (`security.fips.images.policy`):**
 
-[//]: # (| Reject ZK verify=None | CHI with `zookeeper.tls.verify=None` under enforced mode    | CHI rejected with FIPSValidationFailed          |)
+| Test Assertion | Description | Expected Result |
+|----------------|-------------|-----------------|
+| Required + non-fips image | CHI with image lacking "fips" tag | CHI rejected with FIPSImagePolicyViolation |
+| Required + fips image | CHI with image containing "fips" tag | CHI reconciles normally |
+| Required + non-fips Keeper image | CHK with image lacking "fips" tag | CHK rejected with FIPSImagePolicyViolation |
+| Required + version check | Host `SELECT version()` lacks "fips" | Host marked failed, FIPSImagePolicyViolation |
+| Permissive + non-fips | CHI with any image | CHI reconciles (default behavior) |
+| Multiple hosts violation | CHI with multiple non-fips hosts | Single error, short-circuits at first |
 
-[//]: # (| Reject invalid minVersion | CHI with invalid minVersion under enforced mode             | CHI rejected with FIPSValidationFailed          |)
+**Image Tag Detection:**
 
-[//]: # (| Reject external ZooKeeper | CHI references plain ZK nodes under enforced mode           | CHI rejected with FIPSValidationFailed          |)
-
-[//]: # (| Reject CHK TLS bypass | CHK with `clickhouse.tls.verify=None` under enforced mode   | CHK rejected with FIPSValidationFailed          |)
-
-[//]: # (**Image Policy &#40;`security.fips.images.policy`&#41;:**)
-
-[//]: # ()
-[//]: # (| Test Assertion | Description | Expected Result |)
-
-[//]: # (|----------------|-------------|-----------------|)
-
-[//]: # (| Required + non-fips image | CHI with image lacking "fips" tag | CHI rejected with FIPSImagePolicyViolation |)
-
-[//]: # (| Required + fips image | CHI with image containing "fips" tag | CHI reconciles normally |)
-
-[//]: # (| Required + non-fips Keeper image | CHK with image lacking "fips" tag | CHK rejected with FIPSImagePolicyViolation |)
-
-[//]: # (| Required + version check | Host `SELECT version&#40;&#41;` lacks "fips" | Host marked failed, FIPSImagePolicyViolation |)
-
-[//]: # (| Permissive + non-fips | CHI with any image | CHI reconciles &#40;default behavior&#41; |)
-
-[//]: # (| Multiple hosts violation | CHI with multiple non-fips hosts | Single error, short-circuits at first |)
-
-[//]: # (**Image Tag Detection:**)
-
-[//]: # ()
-[//]: # (| Test Assertion | Description | Expected Result |)
-
-[//]: # (|----------------|-------------|-----------------|)
-
-[//]: # (| Tag with "fips" suffix | `altinity/clickhouse-server:25.3.fips` | Detected as FIPS |)
-
-[//]: # (| Tag with "altinityfips" | `altinity/clickhouse-server:25.3.8.30001.altinityfips` | Detected as FIPS |)
-
-[//]: # (| Case insensitive | `...:25.3.FIPS` or `...:25.3.Fips` | Detected as FIPS |)
-
-[//]: # (| Digest-only reference | `repo@sha256:...` | Not detected &#40;no tag&#41; |)
-
-[//]: # (| Registry with "fips" in path | `fips-registry.example.com/image:latest` | Not detected &#40;tag only&#41; |)
+| Test Assertion | Description | Expected Result |
+|----------------|-------------|-----------------|
+| Tag with "fips" suffix | `altinity/clickhouse-server:25.3.fips` | Detected as FIPS |
+| Tag with "altinityfips" | `altinity/clickhouse-server:25.3.8.30001.altinityfips` | Detected as FIPS |
+| Case insensitive | `...:25.3.FIPS` or `...:25.3.Fips` | Detected as FIPS |
+| Digest-only reference | `repo@sha256:...` | Not detected (no tag) |
+| Registry with "fips" in path | `fips-registry.example.com/image:latest` | Not detected (tag only) |
 
 ## clickhouse-operator Connections
 
