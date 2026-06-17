@@ -8239,8 +8239,10 @@ def test_030006(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs("1.0"),
 )
 def test_030007(self):
-    """Verify strict FIPS mode rejects non-compliant CHI and CHK specifications."""
+    """Verify strict FIPS mode rejects non-compliant CHI, CHK, and Operator configurations."""
     chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
+    insecure_k8s_chopconf = "manifests/chopconf/test-030007-insecure-k8s.yaml"
+
     chi_zk_rejected = "manifests/chi/test-073-fips-zk-rejected.yaml"
     chi_zk_rejected_explicit_false = (
         "manifests/chi/test-073-fips-zk-rejected-explicit-false.yaml"
@@ -8258,6 +8260,7 @@ def test_030007(self):
     )
 
     fips_create_shell_namespace_clickhouse_template()
+    operator_ns = self.context.operator_namespace
 
     with Given("strict FIPS operator configuration is applied"):
         fips_apply_operator_config(chopconf_path=chopconf)
@@ -8350,6 +8353,31 @@ def test_030007(self):
             reason="FIPSValidationFailed",
             expect_no_sts=True,
         )
+
+    with When("I attempt to configure the Operator with an insecure Kubeconfig flag (insecure: true)"):
+        util.apply_operator_config(insecure_k8s_chopconf)
+
+    with Then("the operator must refuse to start and log the validation error"):
+        found = False
+        needles = ["kubernetes.tls.insecure", "not allowed"]
+
+        for attempt in range(20):  # Increased to ~60s total
+            operator_pod = kubectl.get_operator_pod(ns=operator_ns)
+            if operator_pod:
+                logs = get_container_logs(pod=operator_pod, container="clickhouse-operator", ns=operator_ns)
+                logs_prev = kubectl.launch(f"logs {operator_pod} -c clickhouse-operator -p", ns=operator_ns,
+                                           ok_to_fail=True)
+
+                combined_logs = logs + logs_prev
+                if all(n in combined_logs for n in needles):
+                    found = True
+                    break
+            time.sleep(3)
+
+        assert found, error("Operator failed to reject explicitly insecure K8s configuration")
+
+    with Finally("I restore the stable FIPS configuration"):
+        fips_apply_operator_config(chopconf_path=chopconf)
 
 
 @TestScenario
@@ -8649,8 +8677,37 @@ def test_030009(self):
             min_version="1.3",
         )
 
+
 @TestScenario
-@Tags("HEAVY")
+@Name("test_030011. FIPS Integrity check: detect binary tampering")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_Integrity_VerificationMismatch("1.0")
+)
+def test_030011(self):
+    """Verify that corrupting the embedded FIPS HMAC causes binaries to panic at startup.
+
+    Procedure:
+    1. Extract FIPS binaries from release images.
+    2. Locate the '.go.fipsinfo' ELF section.
+    3. Flip bits in the HMAC header.
+    4. Verify the binary panics with 'fips140: verification mismatch'.
+    """
+    with Given("operator and metrics-exporter binaries are extracted"):
+        fips_extract_shipped_binaries()
+
+    with Then("clickhouse-operator detects tampering"):
+        check_fips_integrity_failure(
+            binary_path=self.context.fips_op_bin,
+            binary_label="clickhouse-operator"
+        )
+
+    with And("metrics-exporter detects tampering"):
+        check_fips_integrity_failure(
+            binary_path=self.context.fips_me_bin,
+            binary_label="metrics-exporter"
+        )
+
+@TestScenario
 @Name("test_030015. FIPS CAST failure: operator and exporter binaries")
 @Requirements(
     RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail("1.0"),

@@ -221,17 +221,17 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 **Security Coercion (`security.fips.enforced=true`):**
 
-| Test Assertion | Description                                                 | Expected Result                                 |
-|----------------|-------------------------------------------------------------|-------------------------------------------------|
-| Coerce verify to Strict | Deploy with `fips.enforced=true` and no verify set          | ClickHouse/ZK/K8s TLS verify coerced to Strict  |
-| Coerce minVersion to 1.3 | Deploy with `fips.enforced=true` and no minVersion set      | ClickHouse/ZK/K8s TLS minVersion coerced to 1.3 |
-| Coerce IPC mode to Secure | Deploy with `fips.enforced=true` and no IPC mode set        | `security.ipc.mode` coerced to Secure           |
-| Reject insecure kubeconfig at startup | Kubeconfig has `TLSClientConfig.Insecure=true` under strict/FIPS mode | Operator refuses to start                       |
-| Reject verify=None | CHI with `clickhouse.tls.verify=None` under enforced mode   | CHI rejected with FIPSValidationFailed          |
-| Reject ZK verify=None | CHI with `zookeeper.tls.verify=None` under enforced mode    | CHI rejected with FIPSValidationFailed          |
-| Reject invalid minVersion | CHI with invalid minVersion under enforced mode             | CHI rejected with FIPSValidationFailed          |
-| Reject external ZooKeeper | CHI references plain ZK nodes under enforced mode           | CHI rejected with FIPSValidationFailed          |
-| Reject CHK TLS bypass | CHK with `clickhouse.tls.verify=None` under enforced mode   | CHK rejected with FIPSValidationFailed          |
+| Test Assertion | Description | Expected Result (Observable Outcome) |
+|----------------|-------------|-----------------|
+| **Coerce verify to Strict** | Deploy Chopconf with `fips.enforced=true` and `verify=None` | Log: `FIPS strict: coerced ...tls.verify: None → Strict` |
+| **Coerce minVersion to 1.3** | Deploy Chopconf with `fips.enforced=true` and `minVersion=1.2` | Log: `FIPS strict: coerced ...tls.minVersion: 1.2 → 1.3` |
+| **Coerce IPC mode to Secure** | Deploy Chopconf with `fips.enforced=true` and `ipc.mode=Plain` | Log: `FIPS strict: coerced security.ipc.mode: Plain → Secure` |
+| **Reject insecure settings** | Set `kubernetes.tls.insecure: true` in Chopconf with `fips.enforced=true` | **Operator Pod fails to reach Ready**; Log contains `kubernetes.tls.insecure` and `not allowed` |
+| **Reject verify=None (CHI)** | Apply CHI with `clickhouse.tls.verify=None` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
+| **Reject ZK verify=None (CHI)** | Apply CHI with `zookeeper.tls.verify=None` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
+| **Reject invalid minVersion** | Apply CHI with `minVersion: "1.1"` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
+| **Reject external ZooKeeper** | Apply CHI referencing plain ZK nodes under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
+| **Reject CHK TLS bypass** | Apply CHK with spec-level `verify: None` under enforced mode | `chk.status.status` = **Aborted**; `chk.status.errors` contains `FIPSValidationFailed` |
 
 **Image Policy (`security.fips.images.policy`):**
 
@@ -256,7 +256,7 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 ## clickhouse-operator Connections
 
-**Objective:** Verify all clickhouse-operator inbound and outbound connections use FIPS-compliant TLS.
+**Objective:** Verify all clickhouse-operator outbound connections use FIPS-compliant TLS.
 
 **Connection Overview:**
 

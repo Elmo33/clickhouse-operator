@@ -264,7 +264,8 @@ Updating TLS settings on a running CHI SHALL reload ClickHouse with the new FIPS
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig
 version: 1.0
 
-Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
+Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse
+Keeper server and client.
 
 ```yaml
   configuration:
@@ -307,9 +308,9 @@ The deployed ClickHouse Keeper cluster SHALL use only the following ports:
 * Secure Raft communication port 9444
 * Plaintext HTTP readiness probe port 9182 (the `/ready` Raft-quorum health check)
 
-Every exposed port except the readiness probe port 9182 SHALL support TLS communication using only FIPS-compliant 
-protocol versions and cipher suites. Port 9182 SHALL stay unconditionally plaintext HTTP regardless of the 
-secure/insecure configuration (see Boundary).
+Every exposed port except the readiness probe port 9182 and Raft replication port 9444 (which enforces peer-only authentication)
+SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites. Port 9182 SHALL stay 
+unconditionally plaintext HTTP regardless of the secure/insecure configuration (see Boundary).
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.Rescale
 version: 1.0

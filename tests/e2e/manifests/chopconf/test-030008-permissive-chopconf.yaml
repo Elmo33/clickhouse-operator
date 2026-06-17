@@ -1,0 +1,12 @@
+apiVersion: "clickhouse.altinity.com/v1"
+kind: "ClickHouseOperatorConfiguration"
+metadata:
+  name: "test-030008-permissive-chopconf"
+spec:
+  security:
+    # Image-policy gate at its default. Permissive accepts any CH/Keeper image
+    # regardless of FIPS tag, so a non-FIPS CHI must reconcile normally (no
+    # FIPSImagePolicyViolation). TLS posture stays at Permissive too to isolate
+    # the image-policy assertion.
+    images:
+      policy: Permissive
