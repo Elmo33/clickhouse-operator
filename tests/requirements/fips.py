@@ -607,7 +607,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse = Requirement(
     type=None,
     uid=None,
     description=(
-        'The metrics-exporter SHALL discover ClickHouse hosts with HTTPS port `8443` and collect metrics over HTTPS/TLS.\n'
+        'The metrics-exporter SHALL discover ClickHouse hosts using the HTTPS endpoint `8443`.\n'
         '\n'
     ),
     link=None,
@@ -649,6 +649,25 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Connect_ClickHouse_KeeperTLS = Requirement(
     num='9.6'
 )
 
+RQ_SRS_026_ClickHouseOperator_FIPS_Integrity_VerificationMismatch = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.VerificationMismatch',
+    version='1.0',
+    priority=None,
+    group=None,
+    type=None,
+    uid=None,
+    description=(
+        'Each shipped FIPS binary — `clickhouse-operator` and `metrics-exporter` — SHALL perform a software integrity \n'
+        'self-test at initialization by verifying its embedded HMAC. If the binary is tampered with or corrupted such that\n'
+        'the HMAC verification fails, the process SHALL immediately terminate with a `fips140: verification mismatch` panic \n'
+        'to prevent the execution of a compromised cryptographic module.\n'
+        '\n'
+    ),
+    link=None,
+    level=2,
+    num='10.1'
+)
+
 RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail = Requirement(
     name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail',
     version='1.0',
@@ -663,7 +682,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail = Requirement(
     ),
     link=None,
     level=3,
-    num='10.1.1'
+    num='11.1.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail = Requirement(
@@ -680,7 +699,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail = Requirement(
     ),
     link=None,
     level=3,
-    num='10.2.1'
+    num='11.2.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration = Requirement(
@@ -696,7 +715,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration = Requiremen
     ),
     link=None,
     level=3,
-    num='11.1.1'
+    num='12.1.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration = Requirement(
@@ -712,7 +731,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration = Requirement(
     ),
     link=None,
     level=3,
-    num='11.1.2'
+    num='12.1.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ExpectedOutputReplay = Requirement(
@@ -728,7 +747,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ExpectedOutputReplay = Requirem
     ),
     link=None,
     level=3,
-    num='11.1.3'
+    num='12.1.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SuiteCount = Requirement(
@@ -745,7 +764,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SuiteCount = Requirement(
     ),
     link=None,
     level=3,
-    num='11.1.4'
+    num='12.1.4'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration = Requirement(
@@ -761,7 +780,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration = Requiremen
     ),
     link=None,
     level=3,
-    num='11.2.1'
+    num='12.2.1'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration = Requirement(
@@ -777,7 +796,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration = Requirement(
     ),
     link=None,
     level=3,
-    num='11.2.2'
+    num='12.2.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay = Requirement(
@@ -793,7 +812,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay = Requirem
     ),
     link=None,
     level=3,
-    num='11.2.3'
+    num='12.2.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount = Requirement(
@@ -809,7 +828,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount = Requirement(
     ),
     link=None,
     level=3,
-    num='11.2.4'
+    num='12.2.4'
 )
 
 QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
@@ -869,32 +888,34 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse', level=2, num='9.4'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction', level=2, num='9.5'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS', level=2, num='9.6'),
-        Heading(name='CAST Failure', level=1, num='10'),
-        Heading(name='Operator CAST Failure', level=2, num='10.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail', level=3, num='10.1.1'),
-        Heading(name='Exporter CAST Failure', level=2, num='10.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail', level=3, num='10.2.1'),
-        Heading(name='ACVP Algorithm Validation', level=1, num='11'),
-        Heading(name='Operator ACVP Validation', level=2, num='11.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration', level=3, num='11.1.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration', level=3, num='11.1.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay', level=3, num='11.1.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount', level=3, num='11.1.4'),
-        Heading(name='Exporter ACVP Validation', level=2, num='11.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration', level=3, num='11.2.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration', level=3, num='11.2.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay', level=3, num='11.2.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount', level=3, num='11.2.4'),
-        Heading(name='Terminology', level=1, num='12'),
-        Heading(name='SRS', level=2, num='12.1'),
-        Heading(name='FIPS 140-3', level=2, num='12.2'),
-        Heading(name='clickhouse-operator', level=2, num='12.3'),
-        Heading(name='metrics-exporter', level=2, num='12.4'),
-        Heading(name='CHI', level=2, num='12.5'),
-        Heading(name='CHK', level=2, num='12.6'),
-        Heading(name='ACVP', level=2, num='12.7'),
-        Heading(name='CMVP', level=2, num='12.8'),
-        Heading(name='CAVP', level=2, num='12.9'),
+        Heading(name='Integrity Check', level=1, num='10'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.VerificationMismatch', level=2, num='10.1'),
+        Heading(name='CAST Failure', level=1, num='11'),
+        Heading(name='Operator CAST Failure', level=2, num='11.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail', level=3, num='11.1.1'),
+        Heading(name='Exporter CAST Failure', level=2, num='11.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail', level=3, num='11.2.1'),
+        Heading(name='ACVP Algorithm Validation', level=1, num='12'),
+        Heading(name='Operator ACVP Validation', level=2, num='12.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration', level=3, num='12.1.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration', level=3, num='12.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay', level=3, num='12.1.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount', level=3, num='12.1.4'),
+        Heading(name='Exporter ACVP Validation', level=2, num='12.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration', level=3, num='12.2.1'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration', level=3, num='12.2.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay', level=3, num='12.2.3'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount', level=3, num='12.2.4'),
+        Heading(name='Terminology', level=1, num='13'),
+        Heading(name='SRS', level=2, num='13.1'),
+        Heading(name='FIPS 140-3', level=2, num='13.2'),
+        Heading(name='clickhouse-operator', level=2, num='13.3'),
+        Heading(name='metrics-exporter', level=2, num='13.4'),
+        Heading(name='CHI', level=2, num='13.5'),
+        Heading(name='CHK', level=2, num='13.6'),
+        Heading(name='ACVP', level=2, num='13.7'),
+        Heading(name='CMVP', level=2, num='13.8'),
+        Heading(name='CAVP', level=2, num='13.9'),
         ),
     requirements=(
         RQ_SRS_026_ClickHouseOperator_FIPS_HTTPPorts,
@@ -924,6 +945,7 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse,
         RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KeeperRestriction,
         RQ_SRS_026_ClickHouseOperator_FIPS_Connect_ClickHouse_KeeperTLS,
+        RQ_SRS_026_ClickHouseOperator_FIPS_Integrity_VerificationMismatch,
         RQ_SRS_026_ClickHouseOperator_FIPS_CAST_OperatorFail,
         RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration,
@@ -989,32 +1011,34 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
     * 9.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse](#rqsrs-026clickhouseoperatorfipsconnectexporterclickhouse)
     * 9.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction](#rqsrs-026clickhouseoperatorfipsconnectoperatorkeeperrestriction)
     * 9.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS](#rqsrs-026clickhouseoperatorfipsconnectclickhousekeepertls)
-* 10 [CAST Failure](#cast-failure)
-    * 10.1 [Operator CAST Failure](#operator-cast-failure)
-        * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
-    * 10.2 [Exporter CAST Failure](#exporter-cast-failure)
-        * 10.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
-* 11 [ACVP Algorithm Validation](#acvp-algorithm-validation)
-    * 11.1 [Operator ACVP Validation](#operator-acvp-validation)
-        * 11.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
-        * 11.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
-        * 11.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
-        * 11.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
-    * 11.2 [Exporter ACVP Validation](#exporter-acvp-validation)
-        * 11.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
-        * 11.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
-        * 11.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
-        * 11.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
-* 12 [Terminology](#terminology)
-    * 12.1 [SRS](#srs)
-    * 12.2 [FIPS 140-3](#fips-140-3)
-    * 12.3 [clickhouse-operator](#clickhouse-operator)
-    * 12.4 [metrics-exporter](#metrics-exporter)
-    * 12.5 [CHI](#chi)
-    * 12.6 [CHK](#chk)
-    * 12.7 [ACVP](#acvp)
-    * 12.8 [CMVP](#cmvp)
-    * 12.9 [CAVP](#cavp)
+* 10 [Integrity Check](#integrity-check)
+    * 10.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.VerificationMismatch](#rqsrs-026clickhouseoperatorfipsintegrityverificationmismatch)
+* 11 [CAST Failure](#cast-failure)
+    * 11.1 [Operator CAST Failure](#operator-cast-failure)
+        * 11.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
+    * 11.2 [Exporter CAST Failure](#exporter-cast-failure)
+        * 11.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
+* 12 [ACVP Algorithm Validation](#acvp-algorithm-validation)
+    * 12.1 [Operator ACVP Validation](#operator-acvp-validation)
+        * 12.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
+        * 12.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
+        * 12.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
+        * 12.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
+    * 12.2 [Exporter ACVP Validation](#exporter-acvp-validation)
+        * 12.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
+        * 12.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
+        * 12.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
+        * 12.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
+* 13 [Terminology](#terminology)
+    * 13.1 [SRS](#srs)
+    * 13.2 [FIPS 140-3](#fips-140-3)
+    * 13.3 [clickhouse-operator](#clickhouse-operator)
+    * 13.4 [metrics-exporter](#metrics-exporter)
+    * 13.5 [CHI](#chi)
+    * 13.6 [CHK](#chk)
+    * 13.7 [ACVP](#acvp)
+    * 13.8 [CMVP](#cmvp)
+    * 13.9 [CAVP](#cavp)
 
 ## Introduction
 
@@ -1395,7 +1419,7 @@ The clickhouse-operator SHALL communicate with ClickHouse hosts using HTTPS port
 ### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse
 version: 1.0
 
-The metrics-exporter SHALL discover ClickHouse hosts with HTTPS port `8443` and collect metrics over HTTPS/TLS.
+The metrics-exporter SHALL discover ClickHouse hosts using the HTTPS endpoint `8443`.
 
 ### RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction
 version: 1.0
@@ -1408,6 +1432,16 @@ version: 1.0
 
 ClickHouse replicas SHALL connect to Keeper using secure client port `2281` with `secure=yes`.
 
+
+## Integrity Check
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.VerificationMismatch
+version: 1.0
+
+Each shipped FIPS binary — `clickhouse-operator` and `metrics-exporter` — SHALL perform a software integrity 
+self-test at initialization by verifying its embedded HMAC. If the binary is tampered with or corrupted such that
+the HMAC verification fails, the process SHALL immediately terminate with a `fips140: verification mismatch` panic 
+to prevent the execution of a compromised cryptographic module.
 
 ## CAST Failure
 

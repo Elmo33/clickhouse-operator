@@ -51,32 +51,34 @@
     * 9.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Exporter.ClickHouse](#rqsrs-026clickhouseoperatorfipsconnectexporterclickhouse)
     * 9.5 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.Operator.KeeperRestriction](#rqsrs-026clickhouseoperatorfipsconnectoperatorkeeperrestriction)
     * 9.6 [RQ.SRS-026.ClickHouseOperator.FIPS.Connect.ClickHouse.KeeperTLS](#rqsrs-026clickhouseoperatorfipsconnectclickhousekeepertls)
-* 10 [CAST Failure](#cast-failure)
-    * 10.1 [Operator CAST Failure](#operator-cast-failure)
-        * 10.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
-    * 10.2 [Exporter CAST Failure](#exporter-cast-failure)
-        * 10.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
-* 11 [ACVP Algorithm Validation](#acvp-algorithm-validation)
-    * 11.1 [Operator ACVP Validation](#operator-acvp-validation)
-        * 11.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
-        * 11.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
-        * 11.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
-        * 11.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
-    * 11.2 [Exporter ACVP Validation](#exporter-acvp-validation)
-        * 11.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
-        * 11.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
-        * 11.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
-        * 11.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
-* 12 [Terminology](#terminology)
-    * 12.1 [SRS](#srs)
-    * 12.2 [FIPS 140-3](#fips-140-3)
-    * 12.3 [clickhouse-operator](#clickhouse-operator)
-    * 12.4 [metrics-exporter](#metrics-exporter)
-    * 12.5 [CHI](#chi)
-    * 12.6 [CHK](#chk)
-    * 12.7 [ACVP](#acvp)
-    * 12.8 [CMVP](#cmvp)
-    * 12.9 [CAVP](#cavp)
+* 10 [Integrity Check](#integrity-check)
+    * 10.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.VerificationMismatch](#rqsrs-026clickhouseoperatorfipsintegrityverificationmismatch)
+* 11 [CAST Failure](#cast-failure)
+    * 11.1 [Operator CAST Failure](#operator-cast-failure)
+        * 11.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.OperatorFail](#rqsrs-026clickhouseoperatorfipscastoperatorfail)
+    * 11.2 [Exporter CAST Failure](#exporter-cast-failure)
+        * 11.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.CAST.ExporterFail](#rqsrs-026clickhouseoperatorfipscastexporterfail)
+* 12 [ACVP Algorithm Validation](#acvp-algorithm-validation)
+    * 12.1 [Operator ACVP Validation](#operator-acvp-validation)
+        * 12.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
+        * 12.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
+        * 12.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
+        * 12.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
+    * 12.2 [Exporter ACVP Validation](#exporter-acvp-validation)
+        * 12.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
+        * 12.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
+        * 12.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
+        * 12.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
+* 13 [Terminology](#terminology)
+    * 13.1 [SRS](#srs)
+    * 13.2 [FIPS 140-3](#fips-140-3)
+    * 13.3 [clickhouse-operator](#clickhouse-operator)
+    * 13.4 [metrics-exporter](#metrics-exporter)
+    * 13.5 [CHI](#chi)
+    * 13.6 [CHK](#chk)
+    * 13.7 [ACVP](#acvp)
+    * 13.8 [CMVP](#cmvp)
+    * 13.9 [CAVP](#cavp)
 
 ## Introduction
 
@@ -399,8 +401,10 @@ After operator configuration normalization, the effective `minVersion` for each 
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig
 version: 1.0
-
-With `security.fips.enforced: "true"`, the operator SHALL refuse to start when the kubeconfig uses `TLSClientConfig.Insecure=true`.
+With security.fips.enforced: "true", the operator SHALL refuse to start or enter a failed state if an 
+insecure Kubernetes connection is attempted. This applies when:
+* The kubeconfig uses TLSClientConfig.Insecure=true.
+* The [ClickHouseOperatorConfiguration] explicitly sets spec.security.kubernetes.tls.insecure: true.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs
 version: 1.0
@@ -470,6 +474,16 @@ version: 1.0
 
 ClickHouse replicas SHALL connect to Keeper using secure client port `2281` with `secure=yes`.
 
+
+## Integrity Check
+
+### RQ.SRS-026.ClickHouseOperator.FIPS.Integrity.VerificationMismatch
+version: 1.0
+
+Each shipped FIPS binary — `clickhouse-operator` and `metrics-exporter` — SHALL perform a software integrity 
+self-test at initialization by verifying its embedded HMAC. If the binary is tampered with or corrupted such that
+the HMAC verification fails, the process SHALL immediately terminate with a `fips140: verification mismatch` panic 
+to prevent the execution of a compromised cryptographic module.
 
 ## CAST Failure
 
