@@ -7786,9 +7786,6 @@ def test_030001(self):
 
     gofips_version = "v1.0.0"
     gofips140_needle = f"GOFIPS140={gofips_version}"
-    # --fips-info reports the build-baked release version (ldflags from the
-    # `release` file), NOT the image tag — so compare against release_version,
-    # which holds the release-file value even when OPERATOR_VERSION=dev.
     release_version = self.context.release_version
     godebug_default = "fips140=on"
 
@@ -7884,8 +7881,8 @@ def test_030003(self):
             kind="chk",
         )
 
-    with Check("Keeper cluster passes essential FIPS checks"):
-        run_chk_fips_checks(workload=chk, replica_count=2)
+    with Then("Keeper cluster passes essential FIPS checks"):
+        chk_pods = run_chk_fips_checks(workload=chk, replica_count=2)
 
     with When("FIPS ClickHouse is deployed with TLS settings"):
         fips_apply_manifest(
@@ -7923,8 +7920,6 @@ def test_030003(self):
         check_clickhouse_backup_restore_roundtrip_https(pod=backup_pods[0])
 
     with Check("rejected TLS protocol and cipher combinations are not negotiated"):
-        chk_pods = sorted(kubectl.get_chk_pod_names(chk))
-
         fips_assert_rejected_tls_probes(
             chi_pods=chi_pods,
             chk_pods=chk_pods
@@ -8456,6 +8451,14 @@ def test_030008(self):
             expect_no_sts=True,
         )
 
+    with And("aborted non-fips CHK is deleted before switching image policy"):
+        kubectl.launch(
+            f"delete chk {chk_non_fips}",
+            ns=self.context.test_namespace,
+            timeout=600,
+            ok_to_fail=True,
+        )
+
     with When("CHI with two non-fips replicas is applied"):
         fips_apply_manifest_raw(manifest_path=chi_shortcircuit_manifest)
 
@@ -8560,6 +8563,13 @@ def test_030008(self):
                 )
 
     with When("operator image policy is switched to Permissive"):
+        kubectl.launch(
+            "delete chopconf test-074-fips-images-required-chopconf",
+            ns=self.context.operator_namespace,
+            timeout=600,
+            ok_to_fail=True,
+        )
+
         fips_apply_operator_config(chopconf_path=chi_permissive_chopconf)
 
     with And("a non-fips CHI is applied under Permissive policy"):

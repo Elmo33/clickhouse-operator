@@ -594,7 +594,7 @@ def fips_ch_external_secure_query(self, pod, sql, ns=None):
     """
     ns = ns or self.context.test_namespace
     container = self.context.external_chi_container
-    local_port = "9440"
+    local_port = _free_local_port()
 
     pf = subprocess.Popen(
         [
@@ -914,7 +914,7 @@ def fips_run_openssl_s_client_on_pod_port(
     """Run ``openssl s_client`` against a pod listener through ``kubectl port-forward``."""
     ns = ns or self.context.test_namespace
     ca_crt = self.context.tls["ca_crt"]
-    local_port = str(port)
+    local_port = _free_local_port()
 
     pf = subprocess.Popen(
         [
@@ -1065,7 +1065,7 @@ def fips_assert_rejected_tls_probes(
 def fips_curl_pod_port(self, pod, port, path="/", ns=None):
     """Return the HTTP status code from a plain ``curl`` to a pod listener via port-forward."""
     ns = ns or self.context.test_namespace
-    local_port = str(port)
+    local_port = _free_local_port()
 
     pf = subprocess.Popen(
         [
@@ -1931,3 +1931,8 @@ def check_fips_cast_failure(self, binary_path, binary, cast_name="HMAC-SHA2-256"
     assert "simulated CAST failure" in output, error(
         f"{binary}: expected simulated CAST failure message\n{output}"
     )
+
+def _free_local_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return str(s.getsockname()[1])
