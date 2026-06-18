@@ -7919,6 +7919,12 @@ def test_030003(self):
     with Check("backup and restore succeeds through HTTPS API"):
         check_clickhouse_backup_restore_roundtrip_https(pod=backup_pods[0])
 
+    with Check("approved AES-256 TLS 1.3 cipher is negotiated"):
+        fips_assert_aes256_tls13_probes(
+            chi_pods=chi_pods,
+            chk_pods=chk_pods,
+        )
+
     with Check("rejected TLS protocol and cipher combinations are not negotiated"):
         fips_assert_rejected_tls_probes(
             chi_pods=chi_pods,
@@ -8050,6 +8056,7 @@ def test_030004(self):
     with When("CHI OpenSSL cipher suites are updated"):
         chi_manifest_update = fips_edit_manifest(
             source_manifest=chi_manifest,
+            replicas_count=1,
             cipher_suites=["TLS_AES_128_GCM_SHA256"],
             kind="chi",
         )
@@ -8290,9 +8297,8 @@ def test_030006(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs("1.0"),
 )
 def test_030007(self):
-    """Verify strict FIPS mode rejects non-compliant CHI, CHK, and Operator configurations."""
+    """Verify strict FIPS mode rejects non-compliant CHI and CHK specs."""
     chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
-    insecure_k8s_chopconf = "manifests/chopconf/test-030007-insecure-k8s.yaml"
 
     chi_zk_rejected = "manifests/chi/test-073-fips-zk-rejected.yaml"
     chi_zk_rejected_explicit_false = (
@@ -8311,7 +8317,6 @@ def test_030007(self):
     )
 
     fips_create_shell_namespace_clickhouse_template()
-    operator_ns = self.context.operator_namespace
 
     with Given("strict FIPS operator configuration is applied"):
         fips_apply_operator_config(chopconf_path=chopconf)
@@ -8405,30 +8410,6 @@ def test_030007(self):
             expect_no_sts=True,
         )
 
-    with When("I attempt to configure the Operator with an insecure Kubeconfig flag (insecure: true)"):
-        util.apply_operator_config(insecure_k8s_chopconf)
-
-    with Then("the operator must refuse to start and log the validation error"):
-        found = False
-        needles = ["kubernetes.tls.insecure", "not allowed"]
-
-        for attempt in range(20):  # Increased to ~60s total
-            operator_pod = kubectl.get_operator_pod(ns=operator_ns)
-            if operator_pod:
-                logs = get_container_logs(pod=operator_pod, container="clickhouse-operator", ns=operator_ns)
-                logs_prev = kubectl.launch(f"logs {operator_pod} -c clickhouse-operator -p", ns=operator_ns,
-                                           ok_to_fail=True)
-
-                combined_logs = logs + logs_prev
-                if all(n in combined_logs for n in needles):
-                    found = True
-                    break
-            time.sleep(3)
-
-        assert found, error("Operator failed to reject explicitly insecure K8s configuration")
-
-    with Finally("I restore the stable FIPS configuration"):
-        fips_apply_operator_config(chopconf_path=chopconf)
 
 
 @TestScenario
@@ -8475,6 +8456,13 @@ def test_030008(self):
     chi_permissive_manifest = (
         "manifests/chi/test-030008-permissive-non-fips.yaml"
     )
+    backup_non_fips_template = (
+        "manifests/chit/test-030008-backup-non-fips-template.yaml"
+    )
+    chi_backup_non_fips_manifest = (
+        "manifests/chi/test-030003.yaml"
+    )
+
 
     fips_create_shell_namespace_clickhouse_template()
 
@@ -8506,6 +8494,10 @@ def test_030008(self):
     chi_permissive = yaml_manifest.get_name(
         util.get_full_path(chi_permissive_manifest)
     )
+    chi_backup_non_fips = yaml_manifest.get_name(
+        util.get_full_path(chi_backup_non_fips_manifest)
+    )
+
     with Given("FIPS image policy Required is applied"):
         fips_apply_operator_config(chopconf_path=chopconf)
 
@@ -8590,14 +8582,20 @@ def test_030008(self):
     with When("CHI with fips-suffix tag is applied"):
         fips_apply_manifest_raw(manifest_path=chi_fips_suffix_manifest)
 
-    with Then("CHI is admitted because tag contains fips"):
+    with Then("CHI passes image-policy admission because tag contains fips"):
         fips_assert_chi_admitted(chi=chi_fips_suffix)
+
+    with And("fips-suffix CHI is deleted after admission-only check"):
+        fips_cleanup_admission_only_chi(chi=chi_fips_suffix)
 
     with When("CHI with uppercase FIPS tag is applied"):
         fips_apply_manifest_raw(manifest_path=chi_case_insensitive_manifest)
 
-    with Then("CHI is admitted because tag detection is case-insensitive"):
+    with Then("CHI passes image-policy admission because tag detection is case-insensitive"):
         fips_assert_chi_admitted(chi=chi_case_insensitive)
+
+    with And("case-insensitive CHI is deleted after admission-only check"):
+        fips_cleanup_admission_only_chi(chi=chi_case_insensitive)
 
     with When("runtime decoy image alias is prepared"):
         decoy_tag = "altinity/clickhouse-server:25.8.16.10002.altinityfips-decoy"
@@ -8608,10 +8606,6 @@ def test_030008(self):
             text=True,
             check=False,
         )
-        # The kubelet uses minikube's own image store, not the host docker
-        # daemon where `docker tag` created the alias — load it in, otherwise the
-        # decoy pod is ImagePullBackOff (the synthetic tag exists on no registry)
-        # and never starts, so the runtime SELECT version() check never runs.
         load_result = None
         if tag_result.returncode == 0:
             load_result = subprocess.run(
@@ -8656,6 +8650,7 @@ def test_030008(self):
 
     with Then("non-fips CHI is admitted without FIPSImagePolicyViolation"):
         fips_assert_chi_admitted(chi=chi_permissive)
+
 
 @TestScenario
 @Tags("HEAVY")

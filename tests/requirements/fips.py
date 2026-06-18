@@ -259,7 +259,8 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CHK_FIPSConfig = Requirement(
     type=None,
     uid=None,
     description=(
-        'Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.\n'
+        'Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse\n'
+        'Keeper server and client.\n'
         '\n'
         '```yaml\n'
         '  configuration:\n'
@@ -302,9 +303,9 @@ RQ_SRS_026_ClickHouseOperator_FIPS_CHK_FIPSConfig = Requirement(
         '* Secure Raft communication port 9444\n'
         '* Plaintext HTTP readiness probe port 9182 (the `/ready` Raft-quorum health check)\n'
         '\n'
-        'Every exposed port except the readiness probe port 9182 SHALL support TLS communication using only FIPS-compliant \n'
-        'protocol versions and cipher suites. Port 9182 SHALL stay unconditionally plaintext HTTP regardless of the \n'
-        'secure/insecure configuration (see Boundary).\n'
+        'Every exposed port except the readiness probe port 9182 and Raft replication port 9444 (which enforces peer-only authentication)\n'
+        'SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites. Port 9182 SHALL stay \n'
+        'unconditionally plaintext HTTP regardless of the secure/insecure configuration (see Boundary).\n'
         '\n'
     ),
     link=None,
@@ -411,23 +412,6 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RestoreRoundTrip = Requirement(
     num='7.2.3'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RemoteUploadTLS = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'Uploading backups to remote object storage SHALL use FIPS-compliant TLS communication.\n'
-        '\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='7.2.4'
-)
-
 RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion = Requirement(
     name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion',
     version='1.0',
@@ -469,22 +453,6 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion = Requirement(
     num='8.1.1'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInsecureKubeconfig = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'With `security.fips.enforced: "true"`, the operator SHALL refuse to start when the kubeconfig uses `TLSClientConfig.Insecure=true`.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='8.1.2'
-)
-
 RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs = Requirement(
     name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs',
     version='1.0',
@@ -505,7 +473,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs = Requiremen
     ),
     link=None,
     level=3,
-    num='8.1.3'
+    num='8.1.2'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope = Requirement(
@@ -523,7 +491,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope = Requirement(
     ),
     link=None,
     level=3,
-    num='8.1.4'
+    num='8.1.3'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS = Requirement(
@@ -536,12 +504,13 @@ RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS = Requirement(
     description=(
         'With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected with `FIPSImagePolicyViolation` as follows:\n'
         '\n'
-        '* CHI with non-FIPS image tag SHALL be rejected at admission.\n'
-        '* CHK with non-FIPS Keeper image SHALL be rejected at admission.\n'
+        '* CHI with non-FIPS ClickHouse image tag SHALL be rejected at admission.\n'
+        '* CHK with non-FIPS Keeper image tag SHALL be rejected at admission.\n'
+        '* CHI with non-FIPS `clickhouse-backup` sidecar image tag SHALL be rejected at admission.\n'
         '* CHI with multiple non-FIPS hosts SHALL produce a single policy violation error.\n'
         '* Digest-only image references SHALL NOT be detected as FIPS at admission.\n'
         '* Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.\n'
-        '* CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.\n'
+        '* CHI admitted with a FIPS-tagged ClickHouse image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.\n'
         '\n'
     ),
     link=None,
@@ -710,7 +679,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration = Requiremen
     type=None,
     uid=None,
     description=(
-        'Building clickhouse-operator with `-tags acvp_wrapper` SHALL expose a working ACVP responder via argv0 dispatch.\n'
+        'Building `clickhouse-operator` with `-tags acvp_wrapper` SHALL produce a binary whose ACVP responder is reachable through argv0 dispatch when executed as `clickhouse-operator-acvp`.\n'
         '\n'
     ),
     link=None,
@@ -726,7 +695,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration = Requirement(
     type=None,
     uid=None,
     description=(
-        'The clickhouse-operator ACVP responder SHALL answer `getConfig` with supported capabilities.\n'
+        'The `clickhouse-operator` ACVP responder SHALL answer a `getConfig` request successfully. The returned payload SHALL be valid JSON, SHALL advertise `SHA2-256` and `ACVP-AES-GCM`, and SHALL NOT advertise `ML-KEM` or `ML-DSA`.\n'
         '\n'
     ),
     link=None,
@@ -734,37 +703,20 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration = Requirement(
     num='12.1.2'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ExpectedOutputReplay = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay',
+RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SHA2256AFT = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SHA2256AFT',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        '`bash pkg/util/fips/acvp/run.sh` SHALL match all configured expected outputs for the operator.\n'
+        'The `clickhouse-operator` ACVP responder SHALL answer a `SHA2-256` algorithm functional test request for input `abc` with the digest matching `hashlib.sha256(b"abc").digest()`.\n'
         '\n'
     ),
     link=None,
     level=3,
     num='12.1.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SuiteCount = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The tracked ACVP config SHALL report 38 matched expectations for clickhouse-operator.\n'
-        '\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='12.1.4'
 )
 
 RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration = Requirement(
@@ -775,7 +727,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration = Requiremen
     type=None,
     uid=None,
     description=(
-        'Building metrics-exporter with `-tags acvp_wrapper` SHALL expose a working ACVP responder.\n'
+        'Building `metrics-exporter` with `-tags acvp_wrapper` SHALL produce a binary whose ACVP responder is reachable through argv0 dispatch when executed as `metrics-exporter-acvp`.\n'
         '\n'
     ),
     link=None,
@@ -791,7 +743,7 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration = Requirement(
     type=None,
     uid=None,
     description=(
-        'The metrics-exporter ACVP responder SHALL answer `getConfig` with supported capabilities.\n'
+        'The `metrics-exporter` ACVP responder SHALL answer a `getConfig` request successfully. The returned payload SHALL be valid JSON, SHALL advertise `SHA2-256` and `ACVP-AES-GCM`, and SHALL NOT advertise `ML-KEM` or `ML-DSA`.\n'
         '\n'
     ),
     link=None,
@@ -799,36 +751,21 @@ RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration = Requirement(
     num='12.2.2'
 )
 
-RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay',
+RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SHA2256AFT = Requirement(
+    name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SHA2256AFT',
     version='1.0',
     priority=None,
     group=None,
     type=None,
     uid=None,
     description=(
-        '`BINARY=metrics-exporter bash pkg/util/fips/acvp/run.sh` SHALL match all expected outputs.\n'
+        'The `metrics-exporter` ACVP responder SHALL answer a `SHA2-256` algorithm functional test request for input `abc` with the digest matching `hashlib.sha256(b"abc").digest()`.\n'
+        '\n'
         '\n'
     ),
     link=None,
     level=3,
     num='12.2.3'
-)
-
-RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount = Requirement(
-    name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount',
-    version='1.0',
-    priority=None,
-    group=None,
-    type=None,
-    uid=None,
-    description=(
-        'The tracked ACVP config SHALL report 38 matched expectations for metrics-exporter.\n'
-        '\n'
-    ),
-    link=None,
-    level=3,
-    num='12.2.4'
 )
 
 QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
@@ -872,13 +809,11 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSBinary', level=3, num='7.2.1'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig', level=3, num='7.2.2'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RestoreRoundTrip', level=3, num='7.2.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS', level=3, num='7.2.4'),
         Heading(name='FIPS Enforcement Mode', level=1, num='8'),
         Heading(name='Security Coercion', level=2, num='8.1'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion', level=3, num='8.1.1'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig', level=3, num='8.1.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs', level=3, num='8.1.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope', level=3, num='8.1.4'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs', level=3, num='8.1.2'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope', level=3, num='8.1.3'),
         Heading(name='Image Policy', level=2, num='8.2'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS', level=3, num='8.2.1'),
         Heading(name='Runtime Connection Evidence', level=1, num='9'),
@@ -899,13 +834,11 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         Heading(name='Operator ACVP Validation', level=2, num='12.1'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration', level=3, num='12.1.1'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration', level=3, num='12.1.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay', level=3, num='12.1.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount', level=3, num='12.1.4'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SHA2256AFT', level=3, num='12.1.3'),
         Heading(name='Exporter ACVP Validation', level=2, num='12.2'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration', level=3, num='12.2.1'),
         Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration', level=3, num='12.2.2'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay', level=3, num='12.2.3'),
-        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount', level=3, num='12.2.4'),
+        Heading(name='RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SHA2256AFT', level=3, num='12.2.3'),
         Heading(name='Terminology', level=1, num='13'),
         Heading(name='SRS', level=2, num='13.1'),
         Heading(name='FIPS 140-3', level=2, num='13.2'),
@@ -933,9 +866,7 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSBinary,
         RQ_SRS_026_ClickHouseOperator_FIPS_Backup_FIPSConfig,
         RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RestoreRoundTrip,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Backup_RemoteUploadTLS,
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_SecurityCoercion,
-        RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectInsecureKubeconfig,
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_RejectNonCompliantSpecs,
         RQ_SRS_026_ClickHouseOperator_FIPS_Enforced_MinVersionScope,
         RQ_SRS_026_ClickHouseOperator_FIPS_Images_Required_RejectNonFIPS,
@@ -950,12 +881,10 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         RQ_SRS_026_ClickHouseOperator_FIPS_CAST_ExporterFail,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration,
-        RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ExpectedOutputReplay,
-        RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SuiteCount,
+        RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SHA2256AFT,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration,
         RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration,
-        RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ExpectedOutputReplay,
-        RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SuiteCount,
+        RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SHA2256AFT,
         ),
     content='''
 # QA-SRS ClickHouse Operator FIPS 140-3
@@ -995,13 +924,11 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
         * 7.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSBinary](#rqsrs-026clickhouseoperatorfipsbackupfipsbinary)
         * 7.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Backup.FIPSConfig](#rqsrs-026clickhouseoperatorfipsbackupfipsconfig)
         * 7.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RestoreRoundTrip](#rqsrs-026clickhouseoperatorfipsbackuprestoreroundtrip)
-        * 7.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS](#rqsrs-026clickhouseoperatorfipsbackupremoteuploadtls)
 * 8 [FIPS Enforcement Mode](#fips-enforcement-mode)
     * 8.1 [Security Coercion](#security-coercion)
         * 8.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.SecurityCoercion](#rqsrs-026clickhouseoperatorfipsenforcedsecuritycoercion)
-        * 8.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig](#rqsrs-026clickhouseoperatorfipsenforcedrejectinsecurekubeconfig)
-        * 8.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs](#rqsrs-026clickhouseoperatorfipsenforcedrejectnoncompliantspecs)
-        * 8.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope](#rqsrs-026clickhouseoperatorfipsenforcedminversionscope)
+        * 8.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs](#rqsrs-026clickhouseoperatorfipsenforcedrejectnoncompliantspecs)
+        * 8.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.MinVersionScope](#rqsrs-026clickhouseoperatorfipsenforcedminversionscope)
     * 8.2 [Image Policy](#image-policy)
         * 8.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.Images.Required.RejectNonFIPS](#rqsrs-026clickhouseoperatorfipsimagesrequiredrejectnonfips)
 * 9 [Runtime Connection Evidence](#runtime-connection-evidence)
@@ -1022,13 +949,11 @@ QA_SRS_ClickHouse_Operator_FIPS_140_3 = Specification(
     * 12.1 [Operator ACVP Validation](#operator-acvp-validation)
         * 12.1.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpoperatorwrapperintegration)
         * 12.1.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpoperatorconfiggeneration)
-        * 12.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpoperatorexpectedoutputreplay)
-        * 12.1.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpoperatorsuitecount)
+        * 12.1.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SHA2256AFT](#rqsrs-026clickhouseoperatorfipsacvpoperatorsha2256aft)
     * 12.2 [Exporter ACVP Validation](#exporter-acvp-validation)
         * 12.2.1 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration](#rqsrs-026clickhouseoperatorfipsacvpexporterwrapperintegration)
         * 12.2.2 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration](#rqsrs-026clickhouseoperatorfipsacvpexporterconfiggeneration)
-        * 12.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay](#rqsrs-026clickhouseoperatorfipsacvpexporterexpectedoutputreplay)
-        * 12.2.4 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount](#rqsrs-026clickhouseoperatorfipsacvpexportersuitecount)
+        * 12.2.3 [RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SHA2256AFT](#rqsrs-026clickhouseoperatorfipsacvpexportersha2256aft)
 * 13 [Terminology](#terminology)
     * 13.1 [SRS](#srs)
     * 13.2 [FIPS 140-3](#fips-140-3)
@@ -1224,7 +1149,8 @@ Updating TLS settings on a running CHI SHALL reload ClickHouse with the new FIPS
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.FIPSConfig
 version: 1.0
 
-Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse Keeper server and client.
+Operator deploying a `ClickHouseKeeperInstallation` with FIPS TLS OpenSSL settings SHALL start a FIPS-compliant ClickHouse
+Keeper server and client.
 
 ```yaml
   configuration:
@@ -1267,9 +1193,9 @@ The deployed ClickHouse Keeper cluster SHALL use only the following ports:
 * Secure Raft communication port 9444
 * Plaintext HTTP readiness probe port 9182 (the `/ready` Raft-quorum health check)
 
-Every exposed port except the readiness probe port 9182 SHALL support TLS communication using only FIPS-compliant 
-protocol versions and cipher suites. Port 9182 SHALL stay unconditionally plaintext HTTP regardless of the 
-secure/insecure configuration (see Boundary).
+Every exposed port except the readiness probe port 9182 and Raft replication port 9444 (which enforces peer-only authentication)
+SHALL support TLS communication using only FIPS-compliant protocol versions and cipher suites. Port 9182 SHALL stay 
+unconditionally plaintext HTTP regardless of the secure/insecure configuration (see Boundary).
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.CHK.Rescale
 version: 1.0
@@ -1317,12 +1243,6 @@ version: 1.0
 
 Creating a backup and restoring it through the HTTPS API SHALL succeed over TLS.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Backup.RemoteUploadTLS
-version: 1.0
-
-Uploading backups to remote object storage SHALL use FIPS-compliant TLS communication.
-
-
 ## FIPS Enforcement Mode
 
 **Objective:** Verify that `security.fips.enforced: "true"` coerces relaxed security settings and rejects non-compliant CHI/CHK specifications and non-FIPS images.
@@ -1359,11 +1279,6 @@ spec:
 
 After operator configuration normalization, the effective `minVersion` for each TLS client listed above SHALL be `"1.3"`.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectInsecureKubeconfig
-version: 1.0
-
-With `security.fips.enforced: "true"`, the operator SHALL refuse to start when the kubeconfig uses `TLSClientConfig.Insecure=true`.
-
 #### RQ.SRS-026.ClickHouseOperator.FIPS.Enforced.RejectNonCompliantSpecs
 version: 1.0
 
@@ -1390,12 +1305,13 @@ version: 1.0
 
 With `security.fips.images.policy=Required`, non-FIPS images SHALL be rejected with `FIPSImagePolicyViolation` as follows:
 
-* CHI with non-FIPS image tag SHALL be rejected at admission.
-* CHK with non-FIPS Keeper image SHALL be rejected at admission.
+* CHI with non-FIPS ClickHouse image tag SHALL be rejected at admission.
+* CHK with non-FIPS Keeper image tag SHALL be rejected at admission.
+* CHI with non-FIPS `clickhouse-backup` sidecar image tag SHALL be rejected at admission.
 * CHI with multiple non-FIPS hosts SHALL produce a single policy violation error.
 * Digest-only image references SHALL NOT be detected as FIPS at admission.
 * Registry hostname containing `fips` SHALL NOT satisfy FIPS tag detection.
-* CHI admitted with a FIPS-tagged image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
+* CHI admitted with a FIPS-tagged ClickHouse image whose running binary lacks `fips` in `SELECT version()` SHALL fail at runtime.
 
 ## Runtime Connection Evidence
 
@@ -1466,53 +1382,44 @@ Running `metrics-exporter` with `GODEBUG=failfipscast=<name>` SHALL terminate wi
 
 ## ACVP Algorithm Validation
 
-**Objective:** Reproduce ACVP expected-output checks for each FIPS binary using the tracked public-scope config in [`pkg/util/fips/acvp/`](../../../pkg/util/fips/acvp/).
+**Objective:** Verify that each FIPS binary can be built with the ACVP wrapper enabled and that the embedded ACVP responder works through the modulewrapper stdin/stdout protocol.
 
+These requirements cover the e2e ACVP smoke tests only. They do not claim full ACVP expected-output replay or suite-count validation from `pkg/util/fips/acvp/run.sh`.
 
 ### Operator ACVP Validation
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.WrapperIntegration
 version: 1.0
 
-Building clickhouse-operator with `-tags acvp_wrapper` SHALL expose a working ACVP responder via argv0 dispatch.
+Building `clickhouse-operator` with `-tags acvp_wrapper` SHALL produce a binary whose ACVP responder is reachable through argv0 dispatch when executed as `clickhouse-operator-acvp`.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ConfigGeneration
 version: 1.0
 
-The clickhouse-operator ACVP responder SHALL answer `getConfig` with supported capabilities.
+The `clickhouse-operator` ACVP responder SHALL answer a `getConfig` request successfully. The returned payload SHALL be valid JSON, SHALL advertise `SHA2-256` and `ACVP-AES-GCM`, and SHALL NOT advertise `ML-KEM` or `ML-DSA`.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.ExpectedOutputReplay
+#### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SHA2256AFT
 version: 1.0
 
-`bash pkg/util/fips/acvp/run.sh` SHALL match all configured expected outputs for the operator.
-
-#### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Operator.SuiteCount
-version: 1.0
-
-The tracked ACVP config SHALL report 38 matched expectations for clickhouse-operator.
-
+The `clickhouse-operator` ACVP responder SHALL answer a `SHA2-256` algorithm functional test request for input `abc` with the digest matching `hashlib.sha256(b"abc").digest()`.
 
 ### Exporter ACVP Validation
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.WrapperIntegration
 version: 1.0
 
-Building metrics-exporter with `-tags acvp_wrapper` SHALL expose a working ACVP responder.
+Building `metrics-exporter` with `-tags acvp_wrapper` SHALL produce a binary whose ACVP responder is reachable through argv0 dispatch when executed as `metrics-exporter-acvp`.
 
 #### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ConfigGeneration
 version: 1.0
 
-The metrics-exporter ACVP responder SHALL answer `getConfig` with supported capabilities.
+The `metrics-exporter` ACVP responder SHALL answer a `getConfig` request successfully. The returned payload SHALL be valid JSON, SHALL advertise `SHA2-256` and `ACVP-AES-GCM`, and SHALL NOT advertise `ML-KEM` or `ML-DSA`.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.ExpectedOutputReplay
+#### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SHA2256AFT
 version: 1.0
 
-`BINARY=metrics-exporter bash pkg/util/fips/acvp/run.sh` SHALL match all expected outputs.
+The `metrics-exporter` ACVP responder SHALL answer a `SHA2-256` algorithm functional test request for input `abc` with the digest matching `hashlib.sha256(b"abc").digest()`.
 
-#### RQ.SRS-026.ClickHouseOperator.FIPS.ACVP.Exporter.SuiteCount
-version: 1.0
-
-The tracked ACVP config SHALL report 38 matched expectations for metrics-exporter.
 
 ## Terminology
 

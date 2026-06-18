@@ -1,0 +1,15 @@
+apiVersion: "clickhouse.altinity.com/v1"
+kind: "ClickHouseInstallation"
+metadata:
+  name: test-030008-permissive
+spec:
+  configuration:
+    # No PodTemplate -> host resolves to the operator default image
+    # (clickhouse/clickhouse-server:latest), which lacks the "fips" tag
+    # substring. Under security.images.policy=Permissive it MUST still be
+    # admitted (StatefulSet created, no FIPSImagePolicyViolation).
+    clusters:
+      - name: c1
+        layout:
+          shardsCount: 1
+          replicasCount: 1

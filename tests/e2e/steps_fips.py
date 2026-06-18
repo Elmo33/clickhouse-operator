@@ -1077,6 +1077,41 @@ def fips_assert_rejected_tls_probes(
                     f"output:\n{output}"
                 )
 
+@TestStep(Then)
+def fips_assert_aes256_tls13_probes(
+    self,
+    chi_pods,
+    chk_pods,
+    ns=None,
+):
+    """Assert approved TLS 1.3 AES-256-GCM cipher negotiates on FIPS TLS listeners."""
+    ns = ns or self.context.test_namespace
+    approved_cipher = "TLS_AES_256_GCM_SHA384"
+
+    endpoints = (
+        ("ClickHouse HTTPS", chi_pods[0], 8443),
+        ("ClickHouse native TLS", chi_pods[0], 9440),
+        ("ClickHouse interserver HTTPS", chi_pods[0], 9010),
+        ("Keeper secure client", chk_pods[0], 2281),
+        ("Backup API HTTPS", chi_pods[0], 7171),
+    )
+
+    for label, pod, port in endpoints:
+        with Then(f"{label} {pod}:{port} accepts approved AES-256 TLS 1.3 cipher"):
+            output = fips_run_openssl_s_client_on_pod_port(
+                pod=pod,
+                port=port,
+                tls_version="1.3",
+                cipher_suite=approved_cipher,
+                ok_to_fail=True,
+                ns=ns,
+            )
+
+            assert f"Cipher is {approved_cipher}" in output, error(
+                f"{label} {pod}:{port}: expected {approved_cipher} to negotiate\n"
+                f"output:\n{output}"
+            )
+
 @TestStep(When)
 def fips_curl_pod_port(self, pod, port, path="/", ns=None):
     """Return the HTTP status code from a plain ``curl`` to a pod listener via port-forward."""
@@ -1970,8 +2005,6 @@ def _free_local_port():
 def check_fips_integrity_failure(self, binary_path, binary_label):
     """Assert binary panics when the .go.fipsinfo HMAC is tampered with."""
 
-    # 1. Find the file offset of the .go.fipsinfo section
-    # Output format example: [18] .go.fipsinfo PROGBITS 0000000000d680a0 d680a0 ...
     cmd = f"readelf -S -W {shlex.quote(binary_path)}"
     readelf_out = kubectl.run_shell(cmd)
 
@@ -1979,23 +2012,18 @@ def check_fips_integrity_failure(self, binary_path, binary_label):
     assert match, error(f"{binary_label}: .go.fipsinfo section not found in ELF headers")
 
     section_offset = int(match.group(1), 16)
-    # The HMAC starts 16 bytes into the .go.fipsinfo section (after the magic)
     hmac_byte_offset = section_offset + 16
 
-    # 2. Create a corrupted copy of the binary
     corrupted_bin = f"{binary_path}.corrupted"
     shutil.copy2(binary_path, corrupted_bin)
 
     with open(corrupted_bin, "rb+") as f:
         f.seek(hmac_byte_offset)
         original_byte = f.read(1)
-        # XOR the first byte of the HMAC to corrupt it
         corrupted_byte = bytes([original_byte[0] ^ 0xFF])
         f.seek(hmac_byte_offset)
         f.write(corrupted_byte)
 
-    # 3. Execute corrupted binary and expect panic
-    # We use GODEBUG=fips140=on to ensure the check runs at init
     result = subprocess.run(
         [corrupted_bin, "--version"],
         env={"GODEBUG": "fips140=on"},
@@ -2050,4 +2078,22 @@ def check_tls13_cipher_fails(
         or "no shared cipher" in out
     ), error(
         f"{target_host}:{port}: expected {cipher} to be rejected\n{out}"
+    )
+
+@TestStep(Finally)
+def fips_cleanup_admission_only_chi(self, chi):
+    """Cleanup chi"""
+    kubectl.launch(
+        f"delete chi {chi} --ignore-not-found=true --wait=false",
+        ns=current().context.test_namespace,
+        timeout=600,
+        ok_to_fail=True,
+    )
+    kubectl.launch(
+        f"delete sts,pod,svc,pvc,cm,secret "
+        f"-l clickhouse.altinity.com/chi={chi} "
+        f"--ignore-not-found=true --wait=false",
+        ns=current().context.test_namespace,
+        timeout=600,
+        ok_to_fail=True,
     )

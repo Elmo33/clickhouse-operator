@@ -104,7 +104,8 @@ TLS must be enabled for all connections to:
 - Kubernetes API
 - ClickHouse Server
 - ZooKeeper/Keeper
-- Prometheus scrape endpoints
+
+*Note:* Prometheus scrape endpoints (:9999 and :8888) remain outside FIPS TLS scope as a documented boundary gap.
 
 ## Build Verification
 
@@ -134,29 +135,72 @@ TLS must be enabled for all connections to:
 
 ## FIPS 140-3 Valid TLS Cipher Suites
 
-The following cipher suites are valid for this test plan and apply to all TLS-enabled
-inbound and outbound connections for both clickhouse-operator and metrics-exporter.
+**Objective:** Verify the FIPS TLS profile used by operator-managed clients and FIPS listener probes.
 
-### Approved TLS Cipher Suites (Used by Both Clients and Servers)
-
-
-**TLS 1.3:**
+The approved TLS 1.3 cipher suites for this test plan are:
 
 | Cipher Suite | OpenSSL Name |
 |--------------|--------------|
 | TLS_AES_128_GCM_SHA256 | TLS_AES_128_GCM_SHA256 |
 | TLS_AES_256_GCM_SHA384 | TLS_AES_256_GCM_SHA384 |
 
-**Not valid for this test plan (must be rejected):**
-- Any TLS cipher suite not explicitly listed in the approved TLS 1.3 table above
-- Protocol versions: SSLv2, SSLv3, TLS 1.0, TLS 1.1, TLS 1.2
-- Cipher suites using non-approved/legacy algorithms (for this profile), including:
-  - ChaCha20-Poly1305 (TLS v1.3)
-  - RC4, RC2, DES, 3DES, IDEA, SEED, CAMELLIA, ARIA
-  - NULL encryption / NULL authentication
-  - Anonymous key exchange (`aNULL`, `eNULL`, `ADH`, `AECDH`)
-  - Export/weak suites (`EXP`, `LOW`, `40-bit`, `56-bit`)
-  - MD5- or SHA-1-based legacy suites
+### Scope
+
+This section has two separate scopes:
+
+1. **Operator-managed clients**  
+   When `security.fips.enforced=true`, operator-managed TLS clients are coerced to:
+   - `verify=Strict`
+   - `minVersion=1.3`
+
+   This applies to operator/client configuration for:
+   - Kubernetes API
+   - ClickHouse
+   - ZooKeeper/Keeper
+
+2. **Server listener probes**  
+   The e2e listener probes verify that FIPS-configured listeners accept approved TLS 1.3 AES-GCM traffic and reject selected disallowed protocol/cipher combinations.
+
+   Covered listeners:
+   - ClickHouse HTTPS `8443`
+   - ClickHouse native TLS `9440`
+   - ClickHouse interserver HTTPS `9010`
+   - Keeper secure client port `2281`
+   - clickhouse-backup HTTPS API `7171`
+
+### Positive TLS listener checks
+
+| Endpoint | Positive check | Expected Result |
+|----------|----------------|-----------------|
+| ClickHouse HTTPS `8443` | OpenSSL TLS 1.3 with `TLS_AES_128_GCM_SHA256` | Cipher negotiates successfully |
+| ClickHouse native TLS `9440` | Secure native ClickHouse query | Query succeeds over TLS |
+| ClickHouse interserver HTTPS `9010` | OpenSSL TLS 1.3 with `TLS_AES_128_GCM_SHA256` | Cipher negotiates successfully |
+| Keeper secure client `2281` | OpenSSL TLS 1.3 with `TLS_AES_128_GCM_SHA256` | Cipher negotiates successfully |
+| Backup HTTPS API `7171` | curl TLS 1.3 with `TLS_AES_128_GCM_SHA256` | HTTPS request succeeds |
+
+### Negative TLS listener checks
+
+| Rejected Case | Covered Endpoints | Expected Result |
+|---------------|-------------------|-----------------|
+| TLS 1.3 `TLS_CHACHA20_POLY1305_SHA256` | `8443`, `9440`, `9010`, `2281`, `7171` | TLS handshake fails |
+| TLS 1.1 protocol | `8443`, `9440`, `9010`, `2281`, `7171` | TLS handshake fails |
+
+### Important TLS 1.2 boundary
+
+Do **not** treat TLS 1.2 as globally rejected on all ClickHouse, Keeper, or backup listener endpoints.
+
+ClickHouse and Keeper OpenSSL server configuration disables:
+
+```text
+sslv2, sslv3, tlsv1, tlsv1_1
+```
+Operator does not disable TLS 1.2 by default.
+Therefore:
+
+* operator-managed clients must be coerced to TLS 1.3 under FIPS enforcement;
+* listener probes must reject TLS 1.1 and non-approved TLS 1.3 cipher suites;
+* external ClickHouse clients may still use TLS 1.2 when the server OpenSSL configuration enables it.
+
 
 ## ClickHouse Server and Keeper FIPS Configurations
 
@@ -182,7 +226,7 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 | FIPS config applied | Deploy CHK with FIPS TLS settings | Keeper starts with FIPS-compliant TLS                          |
 | No plain client port | Verify client port (2181) disabled when FIPS enforced | Only secure client port (2281) listening                       |
 | No unexpected ports | Verify no other inbound/outbound ports opened | Only expected secure ports listening                           |
-| Raft TLS | Verify Raft port uses TLS | Raft 9444 doesn't communicate over TLS endpoint (not testable) |
+| Raft peer port | Verify Keeper Raft port `9444` is configured and listening | Port `9444` is present as a Keeper Raft peer port; generic client TLS probing is not required and is not part of this test scope |
 | /ready endpoint | CHK readiness probe works on plain HTTP port (9182) | /ready returns 200 OK regardless of FIPS config                  |
 | Scale up | Add node to FIPS-configured Keeper cluster | New node has FIPS config                                       |
 | Scale down | Remove node from FIPS-configured Keeper cluster | Remaining nodes keep FIPS config                               |
@@ -200,20 +244,19 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 | Inbound   | Backup API                           | HTTPS            | 7171         | Yes                            |
 | Storage   | Local mounted ClickHouse data volume | filesystem       | N/A          | N/A                            |
 
-| Test Assertion               | Description                                                                  | Expected Result                                 |
-| ---------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------- |
-| Backup FIPS binary           | Run `clickhouse-backup --version` in sidecar                                 | Output contains `fips`                          |
-| Backup GOFIPS140 module      | Run `go version -m` against `clickhouse-backup` binary                       | Output contains `GOFIPS140=v1.0.0`              |
-| Backup sidecar starts        | Deploy CHI with clickhouse-backup sidecar and FIPS image policy              | Backup sidecar starts successfully              |
-| Backup only expected ports   | Inspect listening ports in backup sidecar                                    | Only expected secure API port `7171` is exposed |
-| Backup API HTTPS             | Connect to backup API on `7171` with trusted CA                              | HTTPS connection succeeds                       |
-| Backup API rejects plaintext | Send plain HTTP request to backup API port `7171`                            | Request is rejected or TLS handshake fails      |
-| Backup to ClickHouse TLS     | Create backup using ClickHouse secure endpoint                               | Backup completes over TLS                       |
-| Restore to ClickHouse TLS    | Restore backup using ClickHouse secure endpoint                              | Restore completes over TLS                      |
-| Backup round trip            | Create table, insert data, create backup, drop data, restore backup          | Restored data matches original data             |
-| TLS 1.3 approved cipher      | Connect backup API using approved TLS 1.3 AES-GCM cipher                     | Connection succeeds                             |
-| Non-approved TLS rejected    | Try TLS 1.2 or non-approved cipher against backup API                        | Connection is rejected                          |
-| FIPS image policy            | Deploy sidecar with non-FIPS backup image when FIPS image policy is required | CHI is rejected or marked failed                |
+| Test Assertion               | Description                                                                 | Expected Result                                 |
+|------------------------------|-----------------------------------------------------------------------------| ----------------------------------------------- |
+| Backup FIPS binary           | Run `clickhouse-backup --version` in sidecar                                | Output contains `fips`                          |
+| Backup GOFIPS140 module      | Run `go version -m` against `clickhouse-backup` binary                      | Output contains `GOFIPS140=v1.0.0`              |
+| Backup sidecar starts        | Deploy CHI with FIPS ClickHouse image and FIPS clickhouse-backup sidecar    | Backup sidecar starts successfully
+| Backup only expected ports   | Inspect listening ports in backup sidecar                                   | Only expected secure ports (`8443`, `9440`, `9010`, `7171`) are exposed in the shared network namespace |
+| Backup API HTTPS             | Connect to backup API on `7171` with trusted CA                             | HTTPS connection succeeds                       |
+| Backup API rejects plaintext | Send plain HTTP request to backup API port `7171`                           | Request is rejected or TLS handshake fails      |
+| Backup to ClickHouse TLS     | Create backup using ClickHouse secure endpoint                              | Backup completes over TLS                       |
+| Restore to ClickHouse TLS    | Restore backup using ClickHouse secure endpoint                             | Restore completes over TLS                      |
+| Backup round trip            | Create table, insert data, create backup, drop data, restore backup         | Restored data matches original data             |
+| TLS 1.3 approved cipher      | Connect backup API using approved TLS 1.3 AES-GCM cipher                    | Connection succeeds                             |
+| Non-approved TLS rejected    | Try TLS 1.2 or non-approved cipher against backup API                       | Connection is rejected                          |
 
 ## FIPS Enforcement Mode
 
@@ -226,7 +269,6 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 | **Coerce verify to Strict** | Deploy Chopconf with `fips.enforced=true` and `verify=None` | Log: `FIPS strict: coerced ...tls.verify: None → Strict` |
 | **Coerce minVersion to 1.3** | Deploy Chopconf with `fips.enforced=true` and `minVersion=1.2` | Log: `FIPS strict: coerced ...tls.minVersion: 1.2 → 1.3` |
 | **Coerce IPC mode to Secure** | Deploy Chopconf with `fips.enforced=true` and `ipc.mode=Plain` | Log: `FIPS strict: coerced security.ipc.mode: Plain → Secure` |
-| **Reject insecure settings** | Set `kubernetes.tls.insecure: true` in Chopconf with `fips.enforced=true` | **Operator Pod fails to reach Ready**; Log contains `kubernetes.tls.insecure` and `not allowed` |
 | **Reject verify=None (CHI)** | Apply CHI with `clickhouse.tls.verify=None` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
 | **Reject ZK verify=None (CHI)** | Apply CHI with `zookeeper.tls.verify=None` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
 | **Reject invalid minVersion** | Apply CHI with `minVersion: "1.1"` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
@@ -237,10 +279,11 @@ inbound and outbound connections for both clickhouse-operator and metrics-export
 
 | Test Assertion | Description | Expected Result |
 |----------------|-------------|-----------------|
-| Required + non-fips image | CHI with image lacking "fips" tag | CHI rejected with FIPSImagePolicyViolation |
-| Required + fips image | CHI with image containing "fips" tag | CHI reconciles normally |
-| Required + non-fips Keeper image | CHK with image lacking "fips" tag | CHK rejected with FIPSImagePolicyViolation |
-| Required + version check | Host `SELECT version()` lacks "fips" | Host marked failed, FIPSImagePolicyViolation |
+| Required + non-fips image | CHI with ClickHouse image lacking "fips" tag | CHI rejected with FIPSImagePolicyViolation |
+| Required + fips image | CHI with ClickHouse image containing "fips" tag | CHI reconciles normally |
+| Required + non-fips Keeper image | CHK with Keeper image lacking "fips" tag | CHK rejected with FIPSImagePolicyViolation |
+| Required + non-fips backup sidecar image | CHI with clickhouse-backup sidecar image lacking "fips" tag | CHI rejected with FIPSImagePolicyViolation |
+| Required + version check | Host `SELECT version()` lacks "fips" | Host marked failed with FIPSImagePolicyViolation |
 | Permissive + non-fips | CHI with any image | CHI reconciles (default behavior) |
 | Multiple hosts violation | CHI with multiple non-fips hosts | Single error, short-circuits at first |
 
@@ -408,23 +451,23 @@ openssl s_client -connect localhost:9999 -cipher ECDHE-RSA-AES256-GCM-SHA384
 
 **Test Matrix:**
 
-| Connection                    | Role   | Testable?       | Tool                    | Test                                                        |
-| ----------------------------- | ------ |-----------------|-------------------------|-------------------------------------------------------------|
-| Operator → K8s API            | Client | 🟨 Partial      | Existing logs           | Assert `verify=Strict`, `minVersion=1.3`, in-cluster auth   |
-| Operator → K8s API            | Client | ❌ No            | `openssl s_server`      | Do not replace Kubernetes API                               |
-| Operator → ClickHouse         | Client | ✅ Yes           | Existing tests          | Assert operator uses `https://...:8443`                     |
-| Operator → ClickHouse         | Client | 🟨 Optional     | Fake TLS server         | Approved cipher negotiation                                 |
-| Operator → ClickHouse         | Client | 🟨 Optional     | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
-| Operator → Keeper             | Client | ❌ No            | N/A                     | Not a normal runtime path                                   |
-| ClickHouse → Keeper           | Client | ✅ Yes           | Existing tests          | `2281 secure=yes`, CH works                                 |
-| ClickHouse → Keeper           | Client | 🟨 Optional     | Fake TLS server         | Approved cipher negotiation                                 |
-| ClickHouse → Keeper           | Client | 🟨 Optional     | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
-| Metrics-exporter → K8s API    | Client | ✅ Yes           | Existing logs + `/proc` | Assert SA auth + port 443 connection                        |
-| Metrics-exporter → ClickHouse | Client | ✅ Yes           | Existing deployment     | Metrics collection succeeds                                 |
-| Metrics-exporter → ClickHouse | Client | 🟨 Optional     | Fake TLS server         | Approved cipher negotiation                                 |
-| Metrics-exporter → ClickHouse | Client | 🟨 Optional     | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
-| Operator metrics `:9999`      | Server | ✅ Yes (no TLS)  | N/A                     | HTTP only (known FIPS gap)                                  |
-| Exporter metrics `:8888`      | Server | ✅ Yes (no TLS)  | N/A                     | HTTP only (known FIPS gap)                                  |
+| Connection                    | Role   | Tool                    | Test                                                        |
+| ----------------------------- | ------ |-------------------------|-------------------------------------------------------------|
+| Operator → K8s API            | Client  | Existing logs           | Assert `verify=Strict`, `minVersion=1.3`, in-cluster auth   |
+| Operator → K8s API            | Client   | `openssl s_server`      | Do not replace Kubernetes API                               |
+| Operator → ClickHouse         | Client   | Existing tests          | Assert operator uses `https://...:8443`                     |
+| Operator → ClickHouse         | Client  | Fake TLS server         | Approved cipher negotiation                                 |
+| Operator → ClickHouse         | Client  | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
+| Operator → Keeper             | Client   | N/A                     | Not a normal runtime path                                   |
+| ClickHouse → Keeper           | Client   | Existing tests          | `2281 secure=yes`, CH works                                 |
+| ClickHouse → Keeper           | Client  | Fake TLS server         | Approved cipher negotiation                                 |
+| ClickHouse → Keeper           | Client  | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
+| Metrics-exporter → K8s API    | Client   | Existing logs + `/proc` | Assert SA auth + port 443 connection                        |
+| Metrics-exporter → ClickHouse | Client   | Existing deployment     | Metrics collection succeeds                                 |
+| Metrics-exporter → ClickHouse | Client  | Fake TLS server         | Approved cipher negotiation                                 |
+| Metrics-exporter → ClickHouse | Client  | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
+| Operator metrics `:9999`      | Server | N/A                     | HTTP only (known FIPS gap)                                  |
+| Exporter metrics `:8888`      | Server | N/A                     | HTTP only (known FIPS gap)                                  |
 
 
 See [FIPS 140-3 Valid TLS Cipher Suites](#fips-140-3-valid-tls-cipher-suites) for approved and non-approved cipher lists.
