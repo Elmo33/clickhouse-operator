@@ -24,7 +24,7 @@ metadata:
 spec:
   containers:
     - name: clickhouse-client
-      image: altinity/clickhouse-server:25.8.16.10001.altinitystable
+      image: altinityinfra/clickhouse-server:0-26.3.13.10001.altinitytest
       command: [ "/bin/sh", "-c", "sleep 3600" ]
       volumeMounts:
       - name: client-config
