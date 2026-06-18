@@ -8786,8 +8786,8 @@ def test_030010(self):
             chi_pod=chi_pods[0],
         )
 
-    with Then("operator pod containers reject TLS peer that offers only non-approved cipher"):
-        fips_assert_fake_openssl_rejects_approved_client_when_only_chacha_offered()
+    with Then("operator pod containers reject fake openSSL server with non approved cipher"):
+        fips_assert_connection_rejected_on_non_approved_cipher()
 
 
 @TestScenario

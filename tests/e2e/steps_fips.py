@@ -2104,9 +2104,14 @@ def fips_cleanup_admission_only_chi(self, chi):
 def check_synthetic_tls13_smoke_from_operator_pod(self, chi_pod, ns=None):
     """Synthetic TLS 1.3 AES-256 smoke from operator pod containers.
 
-    Uses real endpoints, not fake openssl s_server peers:
+    Uses real endpoints:
     * Kubernetes API: kubernetes.default.svc:443
     * ClickHouse HTTPS: CHI pod IP:8443
+
+    Kubernetes is checked in two parts:
+    * verbose unauthenticated /version request proves TLS version/cipher;
+    * non-verbose authenticated pod API request proves service-account API access
+      without leaking the bearer token into logs.
 
     CHK is intentionally excluded because the operator does not normally
     establish a runtime TLS client session to ClickHouse Keeper.
@@ -2123,18 +2128,20 @@ def check_synthetic_tls13_smoke_from_operator_pod(self, chi_pod, ns=None):
     )
 
     approved_cipher = "TLS_AES_256_GCM_SHA384"
+    k8s_auth_url = (
+        "https://kubernetes.default.svc:443"
+        f"/api/v1/namespaces/{operator_ns}/pods/{operator_pod}"
+    )
 
     for container in ("clickhouse-operator", "metrics-exporter"):
         with Then(f"{container} negotiates AES-256 TLS 1.3 to Kubernetes API"):
-            out = kubectl.launch(
+            tls_out = kubectl.launch(
                 f"exec {operator_pod} -c {container} -- "
                 "sh -c '"
-                "IFS= read -r TOKEN < /var/run/secrets/kubernetes.io/serviceaccount/token; "
                 "curl -sS -v "
                 "--tlsv1.3 "
                 f"--tls13-ciphers {approved_cipher} "
                 "--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt "
-                "-H \"Authorization: Bearer ${TOKEN}\" "
                 "-o /dev/null "
                 "-w \"HTTP:%{http_code}\" "
                 "https://kubernetes.default.svc:443/version "
@@ -2144,14 +2151,35 @@ def check_synthetic_tls13_smoke_from_operator_pod(self, chi_pod, ns=None):
                 ok_to_fail=True,
             )
 
-            assert "TLSv1.3" in out, error(
-                f"{container}: expected TLSv1.3 to Kubernetes API\n{out}"
+            assert "TLSv1.3" in tls_out, error(
+                f"{container}: expected TLSv1.3 to Kubernetes API\n{tls_out}"
             )
-            assert approved_cipher in out, error(
-                f"{container}: expected {approved_cipher} to Kubernetes API\n{out}"
+            assert approved_cipher in tls_out, error(
+                f"{container}: expected {approved_cipher} to Kubernetes API\n{tls_out}"
             )
-            assert "HTTP:200" in out, error(
-                f"{container}: expected Kubernetes /version HTTP 200\n{out}"
+            assert "HTTP:200" in tls_out, error(
+                f"{container}: expected Kubernetes /version HTTP 200\n{tls_out}"
+            )
+
+            auth_out = kubectl.launch(
+                f"exec {operator_pod} -c {container} -- "
+                "sh -c '"
+                "IFS= read -r TOKEN < /var/run/secrets/kubernetes.io/serviceaccount/token; "
+                "curl -sS "
+                "--tlsv1.3 "
+                f"--tls13-ciphers {approved_cipher} "
+                "--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt "
+                "-H \"Authorization: Bearer ${TOKEN}\" "
+                "-o /dev/null "
+                "-w \"HTTP:%{http_code}\" "
+                f"{k8s_auth_url}"
+                "'",
+                ns=operator_ns,
+                ok_to_fail=True,
+            )
+
+            assert "HTTP:200" in auth_out, error(
+                f"{container}: expected authenticated Kubernetes API HTTP 200\n{auth_out}"
             )
 
         with And(f"{container} negotiates AES-256 TLS 1.3 to ClickHouse HTTPS"):
@@ -2333,7 +2361,7 @@ def fips_assert_operator_containers_tls13_fails(
 
 
 @TestStep(Then)
-def fips_assert_fake_openssl_rejects_approved_client_when_only_chacha_offered(
+def fips_assert_connection_rejected_on_non_approved_cipher(
     self,
     ns=None,
 ):

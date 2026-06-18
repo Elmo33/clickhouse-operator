@@ -431,50 +431,52 @@ Available CAST names: see `$GOROOT/src/crypto/internal/fips140test/cast_test.go`
 
 ## Synthetic TLS Cipher Validation
 
-**Objective:** Provide supplementary TLS cipher evidence using simple synthetic client calls from the operator pod 
-containers to real runtime endpoints.
+**Objective:** Provide supplementary TLS cipher evidence for operator pod container connections to Kubernetes API and ClickHouse HTTPS endpoints under FIPS enforced mode.
 
-This test does not replace the main runtime FIPS evidence. It is a smoke test proving that both containers in the 
-operator pod can negotiate approved TLS 1.3 AES-GCM cipher suites against real Kubernetes and ClickHouse HTTPS endpoints.
-
-**Scope:**
-
-| Source | Target | Endpoint | Cipher | Expected Result |
-|--------|--------|----------|--------|-----------------|
-| `clickhouse-operator` container | Kubernetes API | `https://kubernetes.default.svc:443` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and authenticated API request returns `HTTP 200` |
-| `metrics-exporter` container | Kubernetes API | `https://kubernetes.default.svc:443` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and authenticated API request returns `HTTP 200` |
-| `clickhouse-operator` container | ClickHouse HTTPS | CHI pod `:8443` `/ping` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and `/ping` returns `HTTP 200` |
-| `metrics-exporter` container | ClickHouse HTTPS | CHI pod `:8443` `/ping` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and `/ping` returns `HTTP 200` |
-
-**Procedure:**
-
-The test runs `curl` from each operator pod container using:
-
-```bash
-curl -v --tlsv1.3 --tls13-ciphers TLS_AES_256_GCM_SHA384 ...
-
-**Test Matrix:**
-
-| Connection                    | Role   | Tool                    | Test                                                        |
-| ----------------------------- | ------ |-------------------------|-------------------------------------------------------------|
-| Operator → K8s API            | Client  | Existing logs           | Assert `verify=Strict`, `minVersion=1.3`, in-cluster auth   |
-| Operator → K8s API            | Client   | `openssl s_server`      | Do not replace Kubernetes API                               |
-| Operator → ClickHouse         | Client   | Existing tests          | Assert operator uses `https://...:8443`                     |
-| Operator → ClickHouse         | Client  | Fake TLS server         | Approved cipher negotiation                                 |
-| Operator → ClickHouse         | Client  | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
-| Operator → Keeper             | Client   | N/A                     | Not a normal runtime path                                   |
-| ClickHouse → Keeper           | Client   | Existing tests          | `2281 secure=yes`, CH works                                 |
-| ClickHouse → Keeper           | Client  | Fake TLS server         | Approved cipher negotiation                                 |
-| ClickHouse → Keeper           | Client  | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
-| Metrics-exporter → K8s API    | Client   | Existing logs + `/proc` | Assert SA auth + port 443 connection                        |
-| Metrics-exporter → ClickHouse | Client   | Existing deployment     | Metrics collection succeeds                                 |
-| Metrics-exporter → ClickHouse | Client  | Fake TLS server         | Approved cipher negotiation                                 |
-| Metrics-exporter → ClickHouse | Client  | Fake TLS server         | TLS1.2 / bad cipher rejected                                |
-| Operator metrics `:9999`      | Server | N/A                     | HTTP only (known FIPS gap)                                  |
-| Exporter metrics `:8888`      | Server | N/A                     | HTTP only (known FIPS gap)                                  |
+This scenario validates that both containers in the operator pod can negotiate an approved TLS 1.3 with real runtime endpoints, and that a TLS peer offering only a non-approved cipher is rejected when the client is restricted to an approved cipher.
 
 
-See [FIPS 140-3 Valid TLS Cipher Suites](#fips-140-3-valid-tls-cipher-suites) for approved and non-approved cipher lists.
+### Scope
+
+| Source                          | Target                  | Endpoint                             | Cipher / Peer Configuration                                                               | Expected Result                                                |
+| ------------------------------- | ----------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `clickhouse-operator` container | Kubernetes API          | `https://kubernetes.default.svc:443` | Client forces `TLS_AES_256_GCM_SHA384` over TLS 1.3                                       | TLS 1.3 handshake succeeds and API request returns `HTTP 200`  |
+| `metrics-exporter` container    | Kubernetes API          | `https://kubernetes.default.svc:443` | Client forces `TLS_AES_256_GCM_SHA384` over TLS 1.3                                       | TLS 1.3 handshake succeeds and API request returns `HTTP 200`  |
+| `clickhouse-operator` container | ClickHouse HTTPS        | CHI pod `:8443` `/ping`              | Client forces `TLS_AES_256_GCM_SHA384` over TLS 1.3                                       | TLS 1.3 handshake succeeds and `/ping` returns `HTTP 200`      |
+| `metrics-exporter` container    | ClickHouse HTTPS        | CHI pod `:8443` `/ping`              | Client forces `TLS_AES_256_GCM_SHA384` over TLS 1.3                                       | TLS 1.3 handshake succeeds and `/ping` returns `HTTP 200`      |
+| `clickhouse-operator` container | Fake OpenSSL TLS server | `fake-openssl-server:8443`           | Server offers only `TLS_CHACHA20_POLY1305_SHA256`; client forces `TLS_AES_256_GCM_SHA384` | TLS handshake fails because there is no shared approved cipher |
+| `metrics-exporter` container    | Fake OpenSSL TLS server | `fake-openssl-server:8443`           | Server offers only `TLS_CHACHA20_POLY1305_SHA256`; client forces `TLS_AES_256_GCM_SHA384` | TLS handshake fails because there is no shared approved cipher |
+
+
+### Test Matrix
+
+| Connection                                                      | Tool                                | Test                                                                                           | Expected Result                                    |
+| --------------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `clickhouse-operator` container → Kubernetes API                | `curl` against real K8s API         | Force TLS 1.3 with `TLS_AES_256_GCM_SHA384`                                                    | TLS handshake succeeds; request returns `HTTP 200` |
+| `metrics-exporter` container → Kubernetes API                   | `curl` against real K8s API         | Force TLS 1.3 with `TLS_AES_256_GCM_SHA384`                                                    | TLS handshake succeeds; request returns `HTTP 200` |
+| `clickhouse-operator` container → ClickHouse HTTPS              | `curl` against real CHI pod `:8443` | Force TLS 1.3 with `TLS_AES_256_GCM_SHA384`                                                    | TLS handshake succeeds; `/ping` returns `HTTP 200` |
+| `metrics-exporter` container → ClickHouse HTTPS                 | `curl` against real CHI pod `:8443` | Force TLS 1.3 with `TLS_AES_256_GCM_SHA384`                                                    | TLS handshake succeeds; `/ping` returns `HTTP 200` |
+| `clickhouse-operator` container → fake rejected-cipher TLS peer | Fake `openssl s_server`             | Server offers only `TLS_CHACHA20_POLY1305_SHA256`; client allows only `TLS_AES_256_GCM_SHA384` | TLS handshake fails                                |
+| `metrics-exporter` container → fake rejected-cipher TLS peer    | Fake `openssl s_server`             | Server offers only `TLS_CHACHA20_POLY1305_SHA256`; client allows only `TLS_AES_256_GCM_SHA384` | TLS handshake fails                                |
+
+### Explicit Exclusions
+
+| Excluded Target                        | Reason                                                                                                                                                                                                                        |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ClickHouse Keeper / CHK                | The operator does not normally establish a runtime TLS client session to ClickHouse Keeper. CHK is only deployed because the CHI manifest depends on Keeper. Keeper TLS is covered by real CHK listener/configuration checks. |
+| Operator metrics `:9999`               | Plain HTTP Prometheus endpoint; outside FIPS TLS scope by documented boundary.                                                                                                                                                |
+| Exporter metrics `:8888`               | Plain HTTP Prometheus/IPC endpoint; outside FIPS TLS scope by documented boundary.                                                                                                                                            |
+
+### Interpretation
+
+This scenario provides supplementary cipher-negotiation evidence.
+
+It proves:
+
+* both containers in the operator pod can negotiate approved TLS 1.3 AES-256-GCM with real Kubernetes API and real ClickHouse HTTPS endpoints;
+* a peer that offers only the non-approved TLS 1.3 ChaCha cipher cannot be used when the client is restricted to the approved AES-256 cipher.
+
+It does not claim that the fake OpenSSL server is a protocol-compatible replacement for Kubernetes or ClickHouse.
 
 ## CI/CD Image and Policy Verification
 
