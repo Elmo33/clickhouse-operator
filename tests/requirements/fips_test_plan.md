@@ -266,8 +266,10 @@ Therefore:
 
 | Test Assertion | Description | Expected Result (Observable Outcome) |
 |----------------|-------------|-----------------|
-| **Coerce verify to Strict** | Deploy Chopconf with `fips.enforced=true` and `verify=None` | Log: `FIPS strict: coerced ...tls.verify: None → Strict` |
-| **Coerce minVersion to 1.3** | Deploy Chopconf with `fips.enforced=true` and `minVersion=1.2` | Log: `FIPS strict: coerced ...tls.minVersion: 1.2 → 1.3` |
+| **Coerce ClickHouse verify to Strict** | Deploy Chopconf with `fips.enforced=true` and `security.clickhouse.tls.verify=None` | Log: `FIPS strict: coerced security.clickhouse.tls.verify: None → Strict` |
+| **Coerce ZooKeeper/Keeper verify to Strict** | Deploy Chopconf with `fips.enforced=true` and `security.zookeeper.tls.verify=None` | Log: `FIPS strict: coerced security.zookeeper.tls.verify: None → Strict` |
+| **Coerce Kubernetes verify to Strict** | Deploy Chopconf with `fips.enforced=true` and `security.kubernetes.tls.verify=None` or relaxed Kubernetes TLS verification | Log: `FIPS strict: coerced security.kubernetes.tls.verify: None → Strict` |
+| **Coerce TLS minVersion to 1.3** | Deploy Chopconf with `fips.enforced=true` and ClickHouse, ZooKeeper/Keeper, and Kubernetes TLS `minVersion=1.2` | Logs show each client coerced to `minVersion: 1.2 → 1.3` |
 | **Coerce IPC mode to Secure** | Deploy Chopconf with `fips.enforced=true` and `ipc.mode=Plain` | Log: `FIPS strict: coerced security.ipc.mode: Plain → Secure` |
 | **Reject verify=None (CHI)** | Apply CHI with `clickhouse.tls.verify=None` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
 | **Reject ZK verify=None (CHI)** | Apply CHI with `zookeeper.tls.verify=None` under enforced mode | `chi.status.status` = **Aborted**; `chi.status.errors` contains `FIPSValidationFailed` |
@@ -429,25 +431,27 @@ Available CAST names: see `$GOROOT/src/crypto/internal/fips140test/cast_test.go`
 
 ## Synthetic TLS Cipher Validation
 
-**Objective:** Validate FIPS cipher enforcement on all external (to the pod) connections (see [diagram](#introduction)) using `openssl s_client` and `openssl s_server`.
+**Objective:** Provide supplementary TLS cipher evidence using simple synthetic client calls from the operator pod 
+containers to real runtime endpoints.
+
+This test does not replace the main runtime FIPS evidence. It is a smoke test proving that both containers in the 
+operator pod can negotiate approved TLS 1.3 AES-GCM cipher suites against real Kubernetes and ClickHouse HTTPS endpoints.
+
+**Scope:**
+
+| Source | Target | Endpoint | Cipher | Expected Result |
+|--------|--------|----------|--------|-----------------|
+| `clickhouse-operator` container | Kubernetes API | `https://kubernetes.default.svc:443` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and authenticated API request returns `HTTP 200` |
+| `metrics-exporter` container | Kubernetes API | `https://kubernetes.default.svc:443` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and authenticated API request returns `HTTP 200` |
+| `clickhouse-operator` container | ClickHouse HTTPS | CHI pod `:8443` `/ping` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and `/ping` returns `HTTP 200` |
+| `metrics-exporter` container | ClickHouse HTTPS | CHI pod `:8443` `/ping` | `TLS_AES_256_GCM_SHA384` | TLS 1.3 handshake succeeds and `/ping` returns `HTTP 200` |
 
 **Procedure:**
 
-Use `openssl` to simulate connections with specific ciphers and verify the operator/exporter
-accepts FIPS-approved ciphers and rejects non-approved ones.
+The test runs `curl` from each operator pod container using:
 
 ```bash
-# Example: Test operator as TLS client against server offering only approved cipher
-openssl s_server -accept 8443 -cert server.crt -key server.key \
-  -ciphersuites TLS_AES_256_GCM_SHA384
-
-# Example: Test operator as TLS client against server offering non-approved cipher  
-openssl s_server -accept 8443 -cert server.crt -key server.key \
-  -cipher ECDHE-RSA-CHACHA20-POLY1305
-
-# Example: Test inbound connection to operator/exporter metrics endpoint
-openssl s_client -connect localhost:9999 -cipher ECDHE-RSA-AES256-GCM-SHA384
-```
+curl -v --tlsv1.3 --tls13-ciphers TLS_AES_256_GCM_SHA384 ...
 
 **Test Matrix:**
 

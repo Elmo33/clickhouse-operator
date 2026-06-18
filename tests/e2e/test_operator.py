@@ -8723,6 +8723,72 @@ def test_030009(self):
             min_version="1.3",
         )
 
+@TestScenario
+@Tags("HEAVY")
+@Name("test_030010. FIPS synthetic TLS cipher validation: K8s API and CHI HTTPS")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0"),
+)
+def test_030010(self):
+    """Supplementary synthetic AES-256 TLS 1.3 cipher smoke.
+
+    This scenario proves that both containers in the operator pod can negotiate
+    TLS 1.3 with TLS_AES_256_GCM_SHA384 against real Kubernetes API and real
+    ClickHouse HTTPS endpoints.
+    """
+
+    chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
+    chi_manifest = "manifests/chi/test-030003.yaml"
+    chk_manifest = "manifests/chk/test-030003.yaml"
+    backup_template = "manifests/chit/test-030003-backup-template.yaml"
+
+    fips_create_shell_namespace_clickhouse_template()
+
+    chi = yaml_manifest.get_name(util.get_full_path(chi_manifest))
+    chk = yaml_manifest.get_name(util.get_full_path(chk_manifest))
+
+    with Given("strict FIPS operator configuration is applied"):
+        fips_apply_operator_config(chopconf_path=chopconf)
+
+    with And("test TLS secret is installed"):
+        create_tls_secret_for_fips_hosts(chi=chi, chk=chk)
+
+    with And("FIPS ClickHouse Keeper is deployed as CHI dependency"):
+        fips_apply_manifest(
+            manifest_path=chk_manifest,
+            replica_count=2,
+            kind="chk",
+        )
+
+    with When("FIPS ClickHouse is deployed with TLS settings"):
+        fips_apply_manifest(
+            manifest_path=chi_manifest,
+            replica_count=2,
+            kind="chi",
+            apply_templates=[backup_template],
+        )
+
+    with Then("ClickHouse cluster pods are ready"):
+        kubectl.wait_chi_status(chi, "Completed")
+        kubectl.wait_objects(
+            chi,
+            {
+                "statefulset": 2,
+                "pod": 2,
+                "service": 3,
+            },
+        )
+        chi_pods = sorted(kubectl.get_pod_names(chi))
+
+    with Then("operator pod containers negotiate AES-256 TLS 1.3 to K8s and CHI"):
+        check_synthetic_tls13_smoke_from_operator_pod(
+            chi_pod=chi_pods[0],
+        )
+
+    with Then("operator pod containers reject TLS peer that offers only non-approved cipher"):
+        fips_assert_fake_openssl_rejects_approved_client_when_only_chacha_offered()
+
 
 @TestScenario
 @Name("test_030011. FIPS Integrity check: detect binary tampering")

@@ -33,6 +33,8 @@ from testflows.core import *
 import e2e.kubectl as kubectl
 
 
+FAKE_OPENSSL_SERVER = "fake-openssl-server"
+
 # ---------------------------------------------------------------------------
 # Build verification
 # ---------------------------------------------------------------------------
@@ -2097,3 +2099,266 @@ def fips_cleanup_admission_only_chi(self, chi):
         timeout=600,
         ok_to_fail=True,
     )
+
+@TestStep(Then)
+def check_synthetic_tls13_smoke_from_operator_pod(self, chi_pod, ns=None):
+    """Synthetic TLS 1.3 AES-256 smoke from operator pod containers.
+
+    Uses real endpoints, not fake openssl s_server peers:
+    * Kubernetes API: kubernetes.default.svc:443
+    * ClickHouse HTTPS: CHI pod IP:8443
+
+    CHK is intentionally excluded because the operator does not normally
+    establish a runtime TLS client session to ClickHouse Keeper.
+    """
+    test_ns = ns or current().context.test_namespace
+    operator_ns = current().context.operator_namespace
+    operator_pod = kubectl.get_operator_pod(ns=operator_ns)
+
+    chi_ip = kubectl.get_field(
+        "pod",
+        chi_pod,
+        ".status.podIP",
+        ns=test_ns,
+    )
+
+    approved_cipher = "TLS_AES_256_GCM_SHA384"
+
+    for container in ("clickhouse-operator", "metrics-exporter"):
+        with Then(f"{container} negotiates AES-256 TLS 1.3 to Kubernetes API"):
+            out = kubectl.launch(
+                f"exec {operator_pod} -c {container} -- "
+                "sh -c '"
+                "IFS= read -r TOKEN < /var/run/secrets/kubernetes.io/serviceaccount/token; "
+                "curl -sS -v "
+                "--tlsv1.3 "
+                f"--tls13-ciphers {approved_cipher} "
+                "--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt "
+                "-H \"Authorization: Bearer ${TOKEN}\" "
+                "-o /dev/null "
+                "-w \"HTTP:%{http_code}\" "
+                "https://kubernetes.default.svc:443/version "
+                "2>&1"
+                "'",
+                ns=operator_ns,
+                ok_to_fail=True,
+            )
+
+            assert "TLSv1.3" in out, error(
+                f"{container}: expected TLSv1.3 to Kubernetes API\n{out}"
+            )
+            assert approved_cipher in out, error(
+                f"{container}: expected {approved_cipher} to Kubernetes API\n{out}"
+            )
+            assert "HTTP:200" in out, error(
+                f"{container}: expected Kubernetes /version HTTP 200\n{out}"
+            )
+
+        with And(f"{container} negotiates AES-256 TLS 1.3 to ClickHouse HTTPS"):
+            out = kubectl.launch(
+                f"exec {operator_pod} -c {container} -- "
+                "sh -c '"
+                "curl -sS -k -v "
+                "--tlsv1.3 "
+                f"--tls13-ciphers {approved_cipher} "
+                "-o /dev/null "
+                "-w \"HTTP:%{http_code}\" "
+                f"https://{chi_ip}:8443/ping "
+                "2>&1"
+                "'",
+                ns=operator_ns,
+                ok_to_fail=True,
+            )
+
+            assert "TLSv1.3" in out, error(
+                f"{container}: expected TLSv1.3 to ClickHouse HTTPS\n{out}"
+            )
+            assert approved_cipher in out, error(
+                f"{container}: expected {approved_cipher} to ClickHouse HTTPS\n{out}"
+            )
+            assert "HTTP:200" in out, error(
+                f"{container}: expected ClickHouse /ping HTTP 200\n{out}"
+            )
+
+
+
+@TestStep(Finally)
+def fips_delete_fake_openssl_server(self, ns=None):
+    """Delete fake OpenSSL TLS server pod/service."""
+    ns = ns or current().context.test_namespace
+
+    kubectl.launch(
+        f"delete svc {FAKE_OPENSSL_SERVER} --ignore-not-found",
+        ns=ns,
+        ok_to_fail=True,
+    )
+    kubectl.launch(
+        f"delete pod {FAKE_OPENSSL_SERVER} --ignore-not-found",
+        ns=ns,
+        ok_to_fail=True,
+    )
+
+
+@TestStep(Given)
+def fips_create_fake_openssl_server(self, cipher_suite, ns=None):
+    """Create fake TLS 1.3 server restricted to one cipher suite."""
+    ns = ns or current().context.test_namespace
+
+    fips_delete_fake_openssl_server(ns=ns)
+
+    manifest = f"""
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {FAKE_OPENSSL_SERVER}
+  labels:
+    app: {FAKE_OPENSSL_SERVER}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: openssl
+    image: altinity/clickhouse-server:25.3.8.30001.altinityfips
+    command: ["sh", "-lc"]
+    args:
+    - |
+      openssl s_server \\
+        -accept 18443 \\
+        -cert /tls/server.crt \\
+        -key /tls/server.key \\
+        -tls1_3 \\
+        -ciphersuites {cipher_suite} \\
+        -www \\
+        -state
+    ports:
+    - containerPort: 18443
+    volumeMounts:
+    - name: tls
+      mountPath: /tls
+      readOnly: true
+  volumes:
+  - name: tls
+    secret:
+      secretName: clickhouse-certs
+"""
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix="-fake-openssl-server.yaml",
+            delete=False,
+        ) as f:
+            f.write(manifest)
+            tmp_path = f.name
+
+        kubectl.launch(f"apply -f {shlex.quote(tmp_path)}", ns=ns)
+
+        kubectl.launch(
+            f"expose pod {FAKE_OPENSSL_SERVER} "
+            f"--name={FAKE_OPENSSL_SERVER} "
+            "--port=8443 "
+            "--target-port=18443",
+            ns=ns,
+        )
+
+        kubectl.launch(
+            f"wait pod {FAKE_OPENSSL_SERVER} "
+            "--for=condition=Ready "
+            "--timeout=120s",
+            ns=ns,
+        )
+    finally:
+        if tmp_path:
+            os.unlink(tmp_path)
+
+
+@TestStep(When)
+def fips_curl_tls13_from_operator_container(
+    self,
+    container,
+    url,
+    cipher_suite,
+    ns=None,
+):
+    """Run curl from one operator pod container with forced TLS 1.3 cipher."""
+    ns = ns or current().context.operator_namespace
+    operator_pod = kubectl.get_operator_pod(ns=ns)
+
+    return kubectl.launch(
+        f"exec {operator_pod} -c {container} -- "
+        "sh -c '"
+        "curl -k -sS -v "
+        "--tlsv1.3 "
+        f"--tls13-ciphers {cipher_suite} "
+        f"{url} "
+        "-o /dev/null "
+        "-w \"HTTP:%{http_code}\" "
+        "2>&1"
+        "'",
+        ns=ns,
+        ok_to_fail=True,
+    )
+
+
+@TestStep(Then)
+def fips_assert_operator_containers_tls13_fails(
+    self,
+    url,
+    cipher_suite,
+    ns=None,
+):
+    """Assert both operator pod containers fail with the requested TLS 1.3 cipher."""
+    ns = ns or current().context.operator_namespace
+
+    failure_needles = (
+        "handshake failure",
+        "no shared cipher",
+        "alert handshake failure",
+        "TLS connect error",
+        "HTTP:000",
+    )
+
+    for container in ("clickhouse-operator", "metrics-exporter"):
+        with Then(f"{container} fails to negotiate {cipher_suite} to {url}"):
+            out = fips_curl_tls13_from_operator_container(
+                container=container,
+                url=url,
+                cipher_suite=cipher_suite,
+                ns=ns,
+            )
+
+            assert any(needle in out for needle in failure_needles), error(
+                f"{container}: expected TLS handshake failure for {cipher_suite}\n{out}"
+            )
+
+
+@TestStep(Then)
+def fips_assert_fake_openssl_rejects_approved_client_when_only_chacha_offered(
+    self,
+    ns=None,
+):
+    """Assert fake ChaCha-only TLS server rejects approved AES-only clients.
+
+    This is the synthetic negative control for rejected cipher behavior.
+    """
+    ns = ns or current().context.test_namespace
+
+    approved_cipher = "TLS_AES_256_GCM_SHA384"
+    rejected_cipher = "TLS_CHACHA20_POLY1305_SHA256"
+    fake_url = f"https://{FAKE_OPENSSL_SERVER}:8443/ping"
+
+    with Given("fake OpenSSL server offers only non-approved ChaCha TLS 1.3 cipher"):
+        fips_create_fake_openssl_server(
+            cipher_suite=rejected_cipher,
+            ns=ns,
+        )
+
+    with Then("operator pod containers restricted to approved AES-256 fail the handshake"):
+        fips_assert_operator_containers_tls13_fails(
+            url=fake_url,
+            cipher_suite=approved_cipher,
+            ns=ns,
+        )
+
+    with Finally("delete fake OpenSSL server"):
+        fips_delete_fake_openssl_server(ns=ns)
