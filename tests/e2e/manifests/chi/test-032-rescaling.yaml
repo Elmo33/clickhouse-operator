@@ -9,9 +9,18 @@ spec:
   defaults:
     templates:
       podTemplate: default
+
   useTemplates:
     - name: persistent-volume
-    - name: clickhouse-version
+
+  templates:
+    podTemplates:
+      - name: default
+        spec:
+          containers:
+            - name: clickhouse-pod
+              image: clickhouse/clickhouse-server:25.3
+              imagePullPolicy: IfNotPresent
   configuration:
     zookeeper:
       nodes:

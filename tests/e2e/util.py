@@ -345,7 +345,7 @@ def install_operator_if_not_exist(
             )
         set_operator_version(current().context.operator_version, shell=shell)
 
-    _apply_operator_godebug(shell=shell)
+    # _apply_operator_godebug(shell=shell)
 
 def install_operator_version(version, shell=None):
     if version == current().context.operator_version or version == "dev":
