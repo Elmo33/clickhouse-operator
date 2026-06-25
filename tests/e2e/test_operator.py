@@ -8708,6 +8708,72 @@ def test_030010(self):
 
 
 @TestScenario
+@Tags("HEAVY")
+@Name("test_030017. FIPS host-run K8s client TLS cipher probes against local OpenSSL fake API")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KubernetesAPI("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
+)
+def test_030017(self):
+    """Host-run FIPS binaries vs protocol/cipher-restricted local OpenSSL fake Kubernetes API.
+
+    Complements test_030010 (curl probes inside the operator pod) by exercising
+    the shipped Go TLS clients directly against the same approved/rejected TLS
+    case lists:
+
+      * approved TLS 1.3 ciphers (``FIPS_APPROVED_TLS13_CIPHER_CASES``):
+        TLS handshake completes, then the process fails decoding the fake HTML API
+      * rejected protocols/ciphers (``FIPS_LISTENER_REJECTED_TLS_CASES``):
+        TLS handshake fails at the TLS layer
+
+    Uses a fake kubeconfig pointing at ``127.0.0.1:<port>`` where a local
+    ``openssl s_server`` stands in for the Kubernetes API, and a strict FIPS
+    operator config (``security.policy=Enforced``, ``security.fips.enforced=true``)
+    matching deployed posture. Minikube may be running; the probe binds an
+    ephemeral localhost port and does not replace the cluster apiserver.
+    """
+    with Given("operator and metrics-exporter binaries are extracted from shipped images"):
+        fips_extract_shipped_binaries()
+
+    with And("local OpenSSL TLS material is prepared"):
+        fips_prepare_local_openssl_tls_material()
+        self.context.cleanup(fips_cleanup_local_openssl_tls_material)
+
+    with And("strict FIPS operator config is prepared for host-run probes"):
+        fips_prepare_local_strict_operator_config()
+
+    config_path = self.context.fips_local_strict_config_path
+
+    binaries = (
+        ("clickhouse-operator", self.context.fips_op_bin),
+        ("metrics-exporter", self.context.fips_me_bin),
+    )
+
+    for binary_label, binary_path in binaries:
+        with Check(
+            f"{binary_label} accepts all approved TLS 1.3 cipher probes "
+            "against local fake k8s API"
+        ):
+            fips_assert_local_fake_k8s_approved_tls_cases(
+                binary_label=binary_label,
+                binary_path=binary_path,
+                config_path=config_path,
+            )
+
+        with Check(
+            f"{binary_label} rejects all rejected TLS protocol/cipher probes "
+            "against local fake k8s API"
+        ):
+            fips_assert_local_fake_k8s_rejected_tls_cases(
+                binary_label=binary_label,
+                binary_path=binary_path,
+                config_path=config_path,
+            )
+
+
+@TestScenario
 @Name("test_030011. FIPS Integrity check: detect binary tampering")
 @Requirements(
     RQ_SRS_026_ClickHouseOperator_FIPS_Integrity_VerificationMismatch("1.0")
@@ -8740,8 +8806,17 @@ def test_030015(self):
     """Verify forced FIPS CAST failure terminates each shipped binary independently."""
 
     CAST_FAILURE_CASES = (
-        "HMAC-SHA2-256",
+        "AES-CBC",
+        "CTR_DRBG",
+        "CounterKDF",
         "HKDF-SHA2-256",
+        "HMAC-SHA2-256",
+        "PBKDF2",
+        "SHA2-256",
+        "SHA2-512",
+        "TLSv1.2-SHA2-256",
+        "TLSv1.3-SHA2-256",
+        "cSHAKE128",
     )
 
     with Given("operator and metrics-exporter binaries are extracted"):
@@ -8859,7 +8934,7 @@ def cleanup_chis(self):
 
 
 @TestModule
-@Name("e2e.test_operator")
+@Name("test_operator")
 @Requirements(RQ_SRS_026_ClickHouseOperator_CustomResource_APIVersion("1.0"),
               RQ_SRS_026_ClickHouseOperator("1.0"))
 def test(self):
