@@ -2364,75 +2364,10 @@ def fips_cleanup_admission_only_chi(self, chi):
         ok_to_fail=True,
     )
 
-# ---------------------------------------------------------------------------
-# Local OpenSSL peer + host-run FIPS binary (fake kubeconfig) TLS probes
-# ---------------------------------------------------------------------------
-
-LOCAL_FAKE_K8S_TLS_REJECTED_MARKERS = (
+FAKE_K8S_TLS_REJECT_ERRORS = (
     "remote error: tls: handshake failure",
     "remote error: tls: protocol version not supported",
 )
-
-
-def local_fake_k8s_tls_rejected_markers(tls_version=None, cipher_suite=None):
-    return LOCAL_FAKE_K8S_TLS_REJECTED_MARKERS
-
-
-def local_fake_k8s_tls_rejection_observed(output, tls_version=None, cipher_suite=None):
-    """True once the operator's own output shows the expected TLS rejection."""
-    return any(
-        marker in output
-        for marker in local_fake_k8s_tls_rejected_markers(tls_version, cipher_suite)
-    )
-
-
-def local_fake_k8s_server_negotiated_cipher(server_log, cipher_suite):
-    """True when s_server logged the negotiated cipher for the operator's handshake."""
-    return bool(cipher_suite) and f"CIPHER is {cipher_suite}" in server_log
-
-
-def read_local_openssl_server_log(context):
-    """Read the local s_server stdout log captured for the current probe."""
-    path = getattr(context, "fips_local_openssl_log_path", None)
-    if not path:
-        return ""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            return f.read()
-    except OSError:
-        return ""
-
-
-def select_lines(text, needles):
-    """Return stripped lines of ``text`` that contain any of ``needles``."""
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if any(needle in line for needle in needles)
-    ]
-
-
-def local_openssl_s_server_command(
-    cert_path,
-    key_path,
-    port,
-    tls_version="1.3",
-    cipher_suite=None,
-):
-    """Build host ``openssl s_server`` argv for a local fake Kubernetes API peer."""
-    command = [
-        "openssl", "s_server",
-        "-accept", str(port),
-        "-cert", cert_path,
-        "-key", key_path,
-    ]
-    command.extend(openssl_tls_version_args(tls_version))
-    command.extend(openssl_cipher_args(tls_version, cipher_suite))
-
-    if tls_version in ("1.0", "1.1"):
-        command.append("-www")
-    command.append("-state")
-    return command
 
 
 def _write_fake_kubeconfig(path, port, ca_cert_path):
@@ -2457,58 +2392,148 @@ users:
 """)
 
 
+def _fake_k8s_probe_env(work_dir, port, ca_cert_path):
+    kubeconfig_path = os.path.join(work_dir, "fake-kubeconfig")
+    _write_fake_kubeconfig(kubeconfig_path, port, ca_cert_path)
+    env = os.environ.copy()
+    env["KUBECONFIG"] = kubeconfig_path
+    env["GODEBUG"] = "fips140=only"
+    env["OPERATOR_POD_NAMESPACE"] = "default"
+    env["OPERATOR_POD_NAME"] = "fips-local-tls-probe"
+    return env
+
+
+def _read_available_stdout(pipe, timeout=0):
+    readable, _, _ = select.select([pipe], [], [], timeout)
+    if not readable:
+        return ""
+    data = os.read(pipe.fileno(), 65536)
+    if not data:
+        return ""
+    return data.decode("utf-8", "replace")
+
+
+def _drain_stdout(pipe, output_parts):
+    while True:
+        chunk = _read_available_stdout(pipe)
+        if not chunk:
+            break
+        output_parts.append(chunk)
+
+
+def _stop_process(process, timeout=5):
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=timeout)
+
+
+def _fake_k8s_tls_probe_complete(output, server_log_path, expectation, cipher_suite):
+    if expectation == "approved":
+        with open(server_log_path, encoding="utf-8", errors="replace") as f:
+            server_log = f.read()
+        return bool(cipher_suite) and f"CIPHER is {cipher_suite}" in server_log
+    return any(err in output for err in FAKE_K8S_TLS_REJECT_ERRORS)
+
+
+def _run_fips_binary_until_tls_probe(
+    binary_path,
+    config_path,
+    env,
+    server_log_path,
+    expectation,
+    cipher_suite=None,
+    max_wait_sec=45,
+):
+    process = subprocess.Popen(
+        [
+            binary_path,
+            "-logtostderr=true",
+            "-v=2",
+            f"--config={config_path}",
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    output_parts = []
+    deadline = time.time() + max_wait_sec
+
+    try:
+        while time.time() < deadline:
+            chunk = _read_available_stdout(process.stdout, timeout=0.5)
+            if chunk:
+                output_parts.append(chunk)
+
+            output = "".join(output_parts)
+            if _fake_k8s_tls_probe_complete(
+                output, server_log_path, expectation, cipher_suite
+            ):
+                break
+
+            if process.poll() is not None:
+                _drain_stdout(process.stdout, output_parts)
+                break
+    finally:
+        _stop_process(process)
+        _drain_stdout(process.stdout, output_parts)
+
+    return process, "".join(output_parts)
+
+
 @TestStep(Given)
 def fips_prepare_local_strict_operator_config(self, base_config_path=None):
-    """Write a temp operator config matching deployed strict FIPS posture.
+    """Operator config with security.policy=Enforced and security.fips.enforced=true."""
+    with Given("strict FIPS operator config (Enforced, fips.enforced=true)"):
+        base_config_path = base_config_path or util.get_full_path(
+            "../../config/config.yaml", lookup_in_host=True
+        )
+        with open(base_config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
 
-    Mirrors ``manifests/chopconf/test-030002-chopconf.yaml`` merged into the
-    shipped ``config/config.yaml``: ``security.policy=Enforced`` and
-    ``security.fips.enforced=true`` (coerces TLS minVersion 1.3, verify Strict).
-    """
-    base_config_path = base_config_path or util.get_full_path(
-        "../../config/config.yaml", lookup_in_host=True
-    )
-    with open(base_config_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+        work_dir = self.context.fips_local_openssl_tls_dir
 
-    work_dir = self.context.fips_local_openssl_tls_dir
+        security = config.setdefault("security", {})
+        security["policy"] = "Enforced"
+        security.setdefault("fips", {})["enforced"] = True
+        security.setdefault("ipc", {})["tokenPath"] = os.path.join(work_dir, "ipc", "token")
+        config_path = os.path.join(work_dir, "strict-operator-config.yaml")
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, default_flow_style=False)
 
-    security = config.setdefault("security", {})
-    security["policy"] = "Enforced"
-    security.setdefault("fips", {})["enforced"] = True
-    security.setdefault("ipc", {})["tokenPath"] = os.path.join(work_dir, "ipc", "token")
-    config_path = os.path.join(work_dir, "strict-operator-config.yaml")
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False)
-
-    self.context.fips_local_strict_config_path = config_path
-    note(f"strict FIPS operator config -> {config_path}")
+        self.context.fips_local_strict_config_path = config_path
+        note(f"strict FIPS operator config -> {config_path}")
     return config_path
 
 
 @TestStep(Given)
 def fips_prepare_local_openssl_tls_material(self):
-    """Create a temp dir with a self-signed cert/key for local ``s_server``."""
-    work_dir = tempfile.mkdtemp(prefix="fips-local-openssl-tls-")
-    cert_path = os.path.join(work_dir, "server.crt")
-    key_path = os.path.join(work_dir, "server.key")
-    subprocess.run(
-        [
-            "openssl", "req", "-x509", "-newkey", "rsa:2048",
-            "-keyout", key_path,
-            "-out", cert_path,
-            "-days", "1",
-            "-nodes",
-            "-subj", "/CN=localhost",
-            "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    self.context.fips_local_openssl_tls_dir = work_dir
-    self.context.fips_local_openssl_cert = cert_path
-    self.context.fips_local_openssl_key = key_path
+    """Self-signed cert and key for local openssl s_server."""
+    with Given("self-signed TLS cert and key for local s_server"):
+        work_dir = tempfile.mkdtemp(prefix="fips-local-openssl-tls-")
+        cert_path = os.path.join(work_dir, "server.crt")
+        key_path = os.path.join(work_dir, "server.key")
+        subprocess.run(
+            [
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", key_path,
+                "-out", cert_path,
+                "-days", "1",
+                "-nodes",
+                "-subj", "/CN=localhost",
+                "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.context.fips_local_openssl_tls_dir = work_dir
+        self.context.fips_local_openssl_cert = cert_path
+        self.context.fips_local_openssl_key = key_path
 
 
 @TestStep(Finally)
@@ -2520,46 +2545,54 @@ def fips_cleanup_local_openssl_tls_material(self):
 
 @TestStep(When)
 def fips_start_local_openssl_server(self, cipher_suite=None, port=None, tls_version="1.3"):
-    """Start ``openssl s_server`` on localhost with the requested TLS protocol/cipher."""
+    """Start openssl s_server on localhost as a fake Kubernetes API."""
     port = port or _free_local_port()
     log_path = os.path.join(self.context.fips_local_openssl_tls_dir, "s_server.log")
-    command = local_openssl_s_server_command(
-        cert_path=self.context.fips_local_openssl_cert,
-        key_path=self.context.fips_local_openssl_key,
-        port=port,
-        tls_version=tls_version,
-        cipher_suite=cipher_suite,
-    )
 
-    if shutil.which("stdbuf"):
-        command = ["stdbuf", "-oL", "-eL", *command]
-    log_file = open(log_path, "w", encoding="utf-8")
+    with Given(f"openssl s_server on 127.0.0.1:{port} (TLS {tls_version})"):
+        command = [
+            "openssl", "s_server",
+            "-accept", str(port),
+            "-cert", self.context.fips_local_openssl_cert,
+            "-key", self.context.fips_local_openssl_key,
+        ]
+        command.extend(openssl_tls_version_args(tls_version))
+        command.extend(openssl_cipher_args(tls_version, cipher_suite))
+        if tls_version in ("1.0", "1.1"):
+            command.append("-www")
+        command.append("-state")
 
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.PIPE,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if process.poll() is not None:
+        if shutil.which("stdbuf"):
+            command = ["stdbuf", "-oL", "-eL", *command]
+        log_file = open(log_path, "w", encoding="utf-8")
+
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    with When("s_server is listening on localhost"):
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if process.poll() is not None:
+                log_file.close()
+                with open(log_path, encoding="utf-8") as f:
+                    server_log = f.read()
+                assert False, error(
+                    f"local openssl s_server exited early on port {port}\n{server_log}"
+                )
+            try:
+                socket.create_connection(("127.0.0.1", int(port)), timeout=0.5).close()
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
             log_file.close()
-            with open(log_path, encoding="utf-8") as f:
-                server_log = f.read()
-            assert False, error(
-                f"local openssl s_server exited early on port {port}\n{server_log}"
-            )
-        try:
-            socket.create_connection(("127.0.0.1", int(port)), timeout=0.5).close()
-            break
-        except OSError:
-            time.sleep(0.2)
-    else:
-        log_file.close()
-        process.kill()
-        assert False, error(f"local openssl s_server not listening on 127.0.0.1:{port}")
+            process.kill()
+            assert False, error(f"local openssl s_server not listening on 127.0.0.1:{port}")
 
     self.context.fips_local_openssl_process = process
     self.context.fips_local_openssl_log_file = log_file
@@ -2593,96 +2626,31 @@ def fips_run_binary_against_local_fake_k8s(
     binary_path,
     config_path,
     expectation="approved",
-    tls_version=None,
     cipher_suite=None,
     max_wait_sec=45,
 ):
-    """Run a shipped binary against fake kubeconfig -> local OpenSSL peer.
+    """Run binary with fake kubeconfig; poll output until TLS probe evidence appears."""
+    with Given("fake kubeconfig targeting local s_server"):
+        env = _fake_k8s_probe_env(
+            self.context.fips_local_openssl_tls_dir,
+            self.context.fips_local_openssl_port,
+            self.context.fips_local_openssl_cert,
+        )
 
-    The operator/metrics-exporter processes are long-running controllers;
-    poll their combined stdout/stderr until probe-specific evidence appears,
-    then terminate them (``subprocess.run`` would time out otherwise).
-    """
-    port = self.context.fips_local_openssl_port
-    kubeconfig_path = os.path.join(self.context.fips_local_openssl_tls_dir, "fake-kubeconfig")
-    _write_fake_kubeconfig(
-        kubeconfig_path,
-        port,
-        self.context.fips_local_openssl_cert,
-    )
-
-    env = os.environ.copy()
-    env["KUBECONFIG"] = kubeconfig_path
-    env["GODEBUG"] = "fips140=only"
-    env["OPERATOR_POD_NAMESPACE"] = "default"
-    env["OPERATOR_POD_NAME"] = "fips-local-tls-probe"
-
-    process = subprocess.Popen(
-        [
-            binary_path,
-            "-logtostderr=true",
-            "-v=2",
-            f"--config={config_path}",
-        ],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    self.context.fips_local_binary_process = process
-
-    chunks = []
-
-    def drain_available():
-        """Append any immediately-available operator output without blocking."""
-        while True:
-            readable, _, _ = select.select([process.stdout], [], [], 0)
-            if not readable:
-                return
-            data = os.read(process.stdout.fileno(), 65536)
-            if not data:
-                return
-            chunks.append(data.decode("utf-8", "replace"))
-
-    deadline = time.time() + max_wait_sec
-
-    try:
-        while time.time() < deadline:
-            select.select([process.stdout], [], [], 0.5)
-            drain_available()
-
-            if expectation == "approved":
-                # operator-tied success: the server logged the cipher it
-                # negotiated with the operator's own handshake.
-                if local_fake_k8s_server_negotiated_cipher(
-                    read_local_openssl_server_log(self.context),
-                    cipher_suite,
-                ):
-                    break
-            elif local_fake_k8s_tls_rejection_observed(
-                "".join(chunks),
-                tls_version=tls_version,
-                cipher_suite=cipher_suite,
-            ):
-                break
-
-            if process.poll() is not None:
-                drain_available()
-                break
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        drain_available()
+    with When("binary runs against fake Kubernetes API"):
+        process, output = _run_fips_binary_until_tls_probe(
+            binary_path=binary_path,
+            config_path=config_path,
+            env=env,
+            server_log_path=self.context.fips_local_openssl_log_path,
+            expectation=expectation,
+            cipher_suite=cipher_suite,
+            max_wait_sec=max_wait_sec,
+        )
         self.context.fips_local_binary_process = None
-
-    output = "".join(chunks)
-    note(output)
-    self.context.fips_local_binary_output = output
-    self.context.fips_local_binary_exit_code = process.returncode
+        self.context.fips_local_binary_output = output
+        self.context.fips_local_binary_exit_code = process.returncode
+        note(output)
     return output
 
 
@@ -2697,64 +2665,45 @@ def fips_assert_local_fake_k8s_tls_probe(
     tls_version="1.3",
     case_name=None,
 ):
-    """Probe host-run binary TLS to a protocol/cipher-restricted local OpenSSL fake API."""
+    """Start s_server, run binary once, assert negotiated cipher or TLS rejection."""
     assert expectation in ("approved", "rejected"), error(
         f"unsupported expectation: {expectation}"
     )
     label = case_name or cipher_suite or f"TLS {tls_version} protocol"
 
     try:
-        fips_start_local_openssl_server(
-            cipher_suite=cipher_suite,
-            tls_version=tls_version,
-        )
-        output = fips_run_binary_against_local_fake_k8s(
-            binary_path=binary_path,
-            config_path=config_path,
-            expectation=expectation,
-            tls_version=tls_version,
-            cipher_suite=cipher_suite,
-        )
-        server_log = read_local_openssl_server_log(self.context)
+        with Given(f"fake Kubernetes API ({label})"):
+            fips_start_local_openssl_server(
+                cipher_suite=cipher_suite,
+                tls_version=tls_version,
+            )
+
+        with When(f"{binary_label} connects via fake kubeconfig"):
+            output = fips_run_binary_against_local_fake_k8s(
+                binary_path=binary_path,
+                config_path=config_path,
+                expectation=expectation,
+                cipher_suite=cipher_suite,
+            )
+
+        with open(self.context.fips_local_openssl_log_path, encoding="utf-8", errors="replace") as f:
+            server_log = f.read()
 
         if expectation == "approved":
-            assert local_fake_k8s_server_negotiated_cipher(
-                server_log, cipher_suite
-            ), error(
-                f"{binary_label} probe={label}: operator did not negotiate "
-                f"{cipher_suite!r} (server log missing 'CIPHER is {cipher_suite}')\n"
-                f"server log tail:\n{server_log[-3000:]}\n"
-                f"operator output tail:\n{output[-2000:]}"
-            )
-            proof = select_lines(
-                server_log, [f"CIPHER is {cipher_suite}", "Shared ciphers:"]
-            )
-            note(
-                f"PROOF [{binary_label} {label}] SUCCESS on the openssl s_server "
-                f"side -- the operator's own TLS handshake negotiated the FIPS "
-                f"cipher:\n" + "\n".join(proof)
-            )
+            with Then(f"{binary_label} negotiates {cipher_suite}"):
+                cipher_line = f"CIPHER is {cipher_suite}"
+                assert cipher_suite and cipher_line in server_log, error(
+                    f"{binary_label} {label}: expected {cipher_suite!r} in server log\n"
+                    f"server log tail:\n{server_log[-3000:]}\n"
+                    f"operator output tail:\n{output[-2000:]}"
+                )
         else:
-            expected_markers = local_fake_k8s_tls_rejected_markers(
-                tls_version,
-                cipher_suite,
-            )
-            assert local_fake_k8s_tls_rejection_observed(
-                output,
-                tls_version=tls_version,
-                cipher_suite=cipher_suite,
-            ), error(
-                f"{binary_label} probe={label}: expected one of {expected_markers!r}\n"
-                f"operator output tail:\n{output[-4000:]}\n"
-                f"server log tail:\n{server_log[-2000:]}"
-            )
-            proof = select_lines(output, list(expected_markers)) or select_lines(
-                server_log, list(TLS_REJECT_MARKERS)
-            )
-            note(
-                f"PROOF [{binary_label} {label}] FAILURE -- the operator's FIPS "
-                f"TLS client refused the probe:\n" + "\n".join(proof)
-            )
+            with Then(f"{binary_label} rejects TLS handshake"):
+                assert any(err in output for err in FAKE_K8S_TLS_REJECT_ERRORS), error(
+                    f"{binary_label} {label}: expected TLS rejection in operator output\n"
+                    f"operator output tail:\n{output[-4000:]}\n"
+                    f"server log tail:\n{server_log[-2000:]}"
+                )
     finally:
         fips_stop_local_openssl_server()
 
@@ -2767,7 +2716,7 @@ def fips_assert_local_fake_k8s_approved_tls_cases(
     config_path,
     approved_cases=None,
 ):
-    """Assert host-run FIPS binary accepts all approved TLS 1.3 cipher probes."""
+    """Run all FIPS_APPROVED_TLS13_CIPHER_CASES against the local fake API."""
     approved_cases = approved_cases or FIPS_APPROVED_TLS13_CIPHER_CASES
 
     for case in approved_cases:
@@ -2791,11 +2740,11 @@ def fips_assert_local_fake_k8s_rejected_tls_cases(
     config_path,
     rejected_cases=None,
 ):
-    """Assert host-run FIPS binary fails all rejected TLS probes against local fake k8s."""
+    """Run all FIPS_LISTENER_REJECTED_TLS_CASES against the local fake API."""
     rejected_cases = rejected_cases or FIPS_LISTENER_REJECTED_TLS_CASES
 
     for case in rejected_cases:
-        # TODO(fips-k8s-minversion): TLS 1.2 cases are temporarily skipped.
+        # Operator K8s client min TLS is 1.3; 1.2 probes are not meaningful yet.
         if case["tls_version"] == "1.2":
             continue
         with Check(f"{binary_label} rejects {case['name']} against local fake k8s API"):

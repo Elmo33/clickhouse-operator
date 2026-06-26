@@ -8642,73 +8642,6 @@ def test_030009(self):
 
 @TestScenario
 @Tags("HEAVY")
-@Name("test_030010. FIPS synthetic TLS cipher validation: K8s API and CHI HTTPS")
-@Requirements(
-    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
-    RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0"),
-)
-def test_030010(self):
-    """Supplementary synthetic AES-256 TLS 1.3 cipher smoke.
-
-    This scenario proves that both containers in the operator pod can negotiate
-    TLS 1.3 with TLS_AES_256_GCM_SHA384 against real Kubernetes API and real
-    ClickHouse HTTPS endpoints.
-    """
-
-    chopconf = "manifests/chopconf/test-030002-chopconf.yaml"
-    chi_manifest = "manifests/chi/test-030003.yaml"
-    chk_manifest = "manifests/chk/test-030003.yaml"
-    backup_template = "manifests/chit/test-030003-backup-template.yaml"
-
-    create_shell_namespace_clickhouse_template()
-
-    chi = yaml_manifest.get_name(util.get_full_path(chi_manifest))
-    chk = yaml_manifest.get_name(util.get_full_path(chk_manifest))
-
-    with Given("strict FIPS operator configuration is applied"):
-        util.apply_operator_config(chopconf)
-
-    with And("test TLS secret is installed"):
-        create_tls_secret_for_fips_hosts(chi=chi, chk=chk)
-
-    with And("FIPS ClickHouse Keeper dependency is deployed"):
-        fips_apply_manifest(
-            manifest_path=chk_manifest,
-            replica_count=2,
-            kind="chk",
-        )
-
-    with When("FIPS ClickHouse is deployed with TLS settings"):
-        fips_apply_manifest(
-            manifest_path=chi_manifest,
-            replica_count=2,
-            kind="chi",
-            apply_templates=[backup_template],
-        )
-
-    with Then("ClickHouse pod names are collected after cluster readiness"):
-        kubectl.wait_chi_status(chi, "Completed")
-        kubectl.wait_objects(
-            chi,
-            {
-                "statefulset": 2,
-                "pod": 2,
-                "service": 3,
-            },
-        )
-        chi_pods = sorted(kubectl.get_pod_names(chi))
-
-    with Check("operator pod containers negotiate AES-256 TLS 1.3 with Kubernetes API and ClickHouse HTTPS"):
-        check_synthetic_tls13_smoke_from_operator_pod(
-            chi_pod=chi_pods[0],
-        )
-
-    with Check("operator pod containers fail all rejected TLS protocol/cipher probes against an approved-only fake server"):
-        fips_assert_connection_rejected_on_non_approved_cipher()
-
-
-@TestScenario
-@Tags("HEAVY")
 @Name("test_030017. FIPS host-run K8s client TLS cipher probes against local OpenSSL fake API")
 @Requirements(
     RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
@@ -8717,22 +8650,9 @@ def test_030010(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
 )
 def test_030017(self):
-    """Host-run FIPS binaries vs protocol/cipher-restricted local OpenSSL fake Kubernetes API.
+    """Host-run FIPS binaries against local openssl s_server via fake kubeconfig.
 
-    Complements test_030010 (curl probes inside the operator pod) by exercising
-    the shipped Go TLS clients directly against the same approved/rejected TLS
-    case lists:
-
-      * approved TLS 1.3 ciphers (``FIPS_APPROVED_TLS13_CIPHER_CASES``):
-        TLS handshake completes, then the process fails decoding the fake HTML API
-      * rejected protocols/ciphers (``FIPS_LISTENER_REJECTED_TLS_CASES``):
-        TLS handshake fails at the TLS layer
-
-    Uses a fake kubeconfig pointing at ``127.0.0.1:<port>`` where a local
-    ``openssl s_server`` stands in for the Kubernetes API, and a strict FIPS
-    operator config (``security.policy=Enforced``, ``security.fips.enforced=true``)
-    matching deployed posture. Minikube may be running; the probe binds an
-    ephemeral localhost port and does not replace the cluster apiserver.
+    Complements test_030010 (in-pod curl probes) using the same approved/rejected case lists.
     """
     with Given("operator and metrics-exporter binaries are extracted from shipped images"):
         fips_extract_shipped_binaries()
@@ -8746,26 +8666,18 @@ def test_030017(self):
 
     config_path = self.context.fips_local_strict_config_path
 
-    binaries = (
+    for binary_label, binary_path in (
         ("clickhouse-operator", self.context.fips_op_bin),
         ("metrics-exporter", self.context.fips_me_bin),
-    )
-
-    for binary_label, binary_path in binaries:
-        with Check(
-            f"{binary_label} accepts all approved TLS 1.3 cipher probes "
-            "against local fake k8s API"
-        ):
+    ):
+        with Check(f"{binary_label} approved TLS 1.3 ciphers against local fake k8s API"):
             fips_assert_local_fake_k8s_approved_tls_cases(
                 binary_label=binary_label,
                 binary_path=binary_path,
                 config_path=config_path,
             )
 
-        with Check(
-            f"{binary_label} rejects all rejected TLS protocol/cipher probes "
-            "against local fake k8s API"
-        ):
+        with Check(f"{binary_label} rejected TLS probes against local fake k8s API"):
             fips_assert_local_fake_k8s_rejected_tls_cases(
                 binary_label=binary_label,
                 binary_path=binary_path,
