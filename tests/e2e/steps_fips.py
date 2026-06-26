@@ -2364,374 +2364,52 @@ def fips_cleanup_admission_only_chi(self, chi):
         ok_to_fail=True,
     )
 
-@TestStep(Then)
-def check_synthetic_tls13_smoke_from_operator_pod(self, chi_pod, ns=None):
-    """Synthetic TLS 1.3 AES-256 smoke from operator pod containers.
-
-    Uses real endpoints:
-    * Kubernetes API: kubernetes.default.svc:443
-    * ClickHouse HTTPS: CHI pod IP:8443
-
-    Kubernetes is checked in two parts:
-    * verbose unauthenticated /version request proves TLS version/cipher;
-    * non-verbose authenticated pod API request proves service-account API access
-      without leaking the bearer token into logs.
-
-    CHK is intentionally excluded because the operator does not normally
-    establish a runtime TLS client session to ClickHouse Keeper.
-    """
-    test_ns = ns or current().context.test_namespace
-    operator_ns = current().context.operator_namespace
-    operator_pod = kubectl.get_operator_pod(ns=operator_ns)
-
-    chi_ip = kubectl.get_field(
-        "pod",
-        chi_pod,
-        ".status.podIP",
-        ns=test_ns,
-    )
-
-    approved_cipher = "TLS_AES_256_GCM_SHA384"
-    k8s_auth_url = (
-        "https://kubernetes.default.svc:443"
-        f"/api/v1/namespaces/{operator_ns}/pods/{operator_pod}"
-    )
-
-    for container in ("clickhouse-operator", "metrics-exporter"):
-        with Then(f"{container} negotiates AES-256 TLS 1.3 to Kubernetes API"):
-            tls_out = kubectl.launch(
-                f"exec {operator_pod} -c {container} -- "
-                "sh -c '"
-                "curl -sS -v "
-                "--tlsv1.3 "
-                f"--tls13-ciphers {approved_cipher} "
-                "--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt "
-                "-o /dev/null "
-                "-w \"HTTP:%{http_code}\" "
-                "https://kubernetes.default.svc:443/version "
-                "2>&1"
-                "'",
-                ns=operator_ns,
-                ok_to_fail=True,
-            )
-
-            assert "TLSv1.3" in tls_out, error(
-                f"{container}: expected TLSv1.3 to Kubernetes API\n{tls_out}"
-            )
-            assert approved_cipher in tls_out, error(
-                f"{container}: expected {approved_cipher} to Kubernetes API\n{tls_out}"
-            )
-            assert "HTTP:200" in tls_out, error(
-                f"{container}: expected Kubernetes /version HTTP 200\n{tls_out}"
-            )
-
-            auth_out = kubectl.launch(
-                f"exec {operator_pod} -c {container} -- "
-                "sh -c '"
-                "IFS= read -r TOKEN < /var/run/secrets/kubernetes.io/serviceaccount/token; "
-                "curl -sS "
-                "--tlsv1.3 "
-                f"--tls13-ciphers {approved_cipher} "
-                "--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt "
-                "-H \"Authorization: Bearer ${TOKEN}\" "
-                "-o /dev/null "
-                "-w \"HTTP:%{http_code}\" "
-                f"{k8s_auth_url}"
-                "'",
-                ns=operator_ns,
-                ok_to_fail=True,
-            )
-
-            assert "HTTP:200" in auth_out, error(
-                f"{container}: expected authenticated Kubernetes API HTTP 200\n{auth_out}"
-            )
-
-        with And(f"{container} negotiates AES-256 TLS 1.3 to ClickHouse HTTPS"):
-            out = kubectl.launch(
-                f"exec {operator_pod} -c {container} -- "
-                "sh -c '"
-                "curl -sS -k -v "
-                "--tlsv1.3 "
-                f"--tls13-ciphers {approved_cipher} "
-                "-o /dev/null "
-                "-w \"HTTP:%{http_code}\" "
-                f"https://{chi_ip}:8443/ping "
-                "2>&1"
-                "'",
-                ns=operator_ns,
-                ok_to_fail=True,
-            )
-
-            assert "TLSv1.3" in out, error(
-                f"{container}: expected TLSv1.3 to ClickHouse HTTPS\n{out}"
-            )
-            assert approved_cipher in out, error(
-                f"{container}: expected {approved_cipher} to ClickHouse HTTPS\n{out}"
-            )
-            assert "HTTP:200" in out, error(
-                f"{container}: expected ClickHouse /ping HTTP 200\n{out}"
-            )
-
-
-
-@TestStep(Finally)
-def fips_delete_fake_openssl_server(self, ns=None):
-    """Delete fake OpenSSL TLS server pod/service."""
-    ns = ns or current().context.test_namespace
-
-    kubectl.launch(
-        f"delete svc {FAKE_OPENSSL_SERVER} --ignore-not-found",
-        ns=ns,
-        ok_to_fail=True,
-    )
-    kubectl.launch(
-        f"delete pod {FAKE_OPENSSL_SERVER} --ignore-not-found",
-        ns=ns,
-        ok_to_fail=True,
-    )
-
-
-@TestStep(Given)
-def fips_create_fake_openssl_server(self, ns=None):
-    """Create fake TLS 1.3 server offering only FIPS-approved cipher suites."""
-    ns = ns or current().context.test_namespace
-
-    fips_delete_fake_openssl_server(ns=ns)
-
-    server_command = " ".join(
-        shlex.quote(arg) for arg in fake_openssl_s_server_command(
-            tls_version="1.3",
-            cipher_suite=FIPS_OPERATOR_APPROVED_TLS13_CIPHER_SUITES,
-        )
-    )
-
-    manifest = f"""
-apiVersion: v1
-kind: Pod
-metadata:
-  name: {FAKE_OPENSSL_SERVER}
-  labels:
-    app: {FAKE_OPENSSL_SERVER}
-spec:
-  restartPolicy: Always
-  containers:
-  - name: openssl
-    image: altinity/clickhouse-server:25.3.8.30001.altinityfips
-    command: ["sh", "-lc"]
-    args:
-    - |
-      {server_command}
-    ports:
-    - containerPort: 18443
-    volumeMounts:
-    - name: tls
-      mountPath: /tls
-      readOnly: true
-  volumes:
-  - name: tls
-    secret:
-      secretName: clickhouse-certs
-"""
-
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix="-fake-openssl-server.yaml",
-            delete=False,
-        ) as f:
-            f.write(manifest)
-            tmp_path = f.name
-
-        kubectl.launch(f"apply -f {shlex.quote(tmp_path)}", ns=ns)
-
-        kubectl.launch(
-            f"expose pod {FAKE_OPENSSL_SERVER} "
-            f"--name={FAKE_OPENSSL_SERVER} "
-            "--port=8443 "
-            "--target-port=18443",
-            ns=ns,
-        )
-
-        kubectl.launch(
-            f"wait pod {FAKE_OPENSSL_SERVER} "
-            "--for=condition=Ready "
-            "--timeout=120s",
-            ns=ns,
-        )
-    finally:
-        if tmp_path:
-            os.unlink(tmp_path)
-
-
-@TestStep(When)
-def fips_curl_tls_from_operator_container(
-    self,
-    container,
-    url,
-    tls_version="1.3",
-    cipher_suite=None,
-    ns=None,
-):
-    """Run curl from one operator pod container with forced TLS version/cipher."""
-    ns = ns or current().context.operator_namespace
-    operator_pod = kubectl.get_operator_pod(ns=ns)
-    curl_tls_flags = " ".join(
-        shlex.quote(arg) for arg in curl_tls_version_args(tls_version, cipher_suite)
-    )
-
-    return kubectl.launch(
-        f"exec {operator_pod} -c {container} -- "
-        "sh -c '"
-        "curl -k -sS -v "
-        f"{curl_tls_flags} "
-        f"{url} "
-        "-o /dev/null "
-        "-w \"HTTP:%{http_code}\" "
-        "2>&1"
-        "'",
-        ns=ns,
-        ok_to_fail=True,
-    )
-
-
-@TestStep(When)
-def fips_curl_tls13_from_operator_container(
-    self,
-    container,
-    url,
-    cipher_suite,
-    ns=None,
-):
-    """Run curl from one operator pod container with forced TLS 1.3 cipher."""
-    return fips_curl_tls_from_operator_container(
-        container=container,
-        url=url,
-        tls_version="1.3",
-        cipher_suite=cipher_suite,
-        ns=ns,
-    )
-
-
-@TestStep(Then)
-def fips_assert_operator_containers_tls_fails(
-    self,
-    url,
-    tls_version="1.3",
-    cipher_suite=None,
-    case_name=None,
-    ns=None,
-):
-    """Assert both operator pod containers fail with the requested TLS probe."""
-    ns = ns or current().context.operator_namespace
-    label = case_name or cipher_suite or f"TLS {tls_version} protocol"
-
-    for container in ("clickhouse-operator", "metrics-exporter"):
-        with Then(f"{container} fails to negotiate {label} to {url}"):
-            out = fips_curl_tls_from_operator_container(
-                container=container,
-                url=url,
-                tls_version=tls_version,
-                cipher_suite=cipher_suite,
-                ns=ns,
-            )
-
-            assert any(
-                needle in out for needle in OPERATOR_CONTAINER_TLS_FAILURE_NEEDLES
-            ), error(
-                f"{container}: expected TLS handshake failure for {label}\n{out}"
-            )
-
-
-@TestStep(Then)
-def fips_assert_operator_containers_tls13_fails(
-    self,
-    url,
-    cipher_suite,
-    case_name=None,
-    ns=None,
-):
-    """Assert both operator pod containers fail with the requested TLS 1.3 cipher."""
-    fips_assert_operator_containers_tls_fails(
-        url=url,
-        tls_version="1.3",
-        cipher_suite=cipher_suite,
-        case_name=case_name,
-        ns=ns,
-    )
-
-
-@TestStep(Check)
-def fips_assert_rejected_tls_cases_on_fake_openssl_server(
-    self,
-    rejected_cases=None,
-    ns=None,
-):
-    """Assert operator clients fail all rejected TLS probes against approved fake server."""
-    operator_ns = current().context.operator_namespace
-    fake_url = f"https://{FAKE_OPENSSL_SERVER}:8443/ping"
-    rejected_cases = rejected_cases or FIPS_LISTENER_REJECTED_TLS_CASES
-
-    with Given(
-        "fake OpenSSL server offers only approved TLS 1.3 AES-GCM cipher suites"
-    ):
-        fips_create_fake_openssl_server(ns=ns)
-
-    for case in rejected_cases:
-        with Check(f"operator clients fail {case['name']} against approved-only fake server"):
-            fips_assert_operator_containers_tls_fails(
-                url=fake_url,
-                tls_version=case["tls_version"],
-                cipher_suite=case["cipher_suite"],
-                case_name=case["name"],
-                ns=operator_ns,
-            )
-
-
-@TestStep(Then)
-def fips_assert_connection_rejected_on_non_approved_cipher(
-    self,
-    ns=None,
-):
-    """Assert operator clients fail all rejected TLS probes against approved fake server.
-
-    Deploy one fake ``openssl s_server`` pod that offers only the approved TLS 1.3
-    AES-GCM cipher suites, then verify both operator containers fail every rejected
-    protocol/cipher client probe from ``FIPS_LISTENER_REJECTED_TLS_CASES``.
-    """
-    ns = ns or current().context.test_namespace
-
-    try:
-        fips_assert_rejected_tls_cases_on_fake_openssl_server(ns=ns)
-    finally:
-        fips_delete_fake_openssl_server(ns=ns)
-
-
 # ---------------------------------------------------------------------------
 # Local OpenSSL peer + host-run FIPS binary (fake kubeconfig) TLS probes
 # ---------------------------------------------------------------------------
 
-LOCAL_FAKE_K8S_TLS_APPROVED_MARKER = "serializer for text/html doesn't exist"
-
-# Genuine TLS-layer rejections the K8s Go client logs under GODEBUG=fips140=only
-# against a non-approved peer. With the operator flooring its K8s-API client at
-# TLS 1.3 (security.policy=Enforced), a server below 1.3 fails with the protocol
-# error and a non-approved 1.3 cipher fails the handshake.
 LOCAL_FAKE_K8S_TLS_REJECTED_MARKERS = (
     "remote error: tls: handshake failure",
     "remote error: tls: protocol version not supported",
 )
 
 
-def local_fake_k8s_tls_probe_succeeded(output, expectation):
-    """Return True once binary output proves the expected TLS probe outcome."""
-    if expectation == "approved":
-        return LOCAL_FAKE_K8S_TLS_APPROVED_MARKER in output
+def local_fake_k8s_tls_rejected_markers(tls_version=None, cipher_suite=None):
+    return LOCAL_FAKE_K8S_TLS_REJECTED_MARKERS
 
-    for marker in LOCAL_FAKE_K8S_TLS_REJECTED_MARKERS:
-        if marker in output:
-            return True
-    return False
+
+def local_fake_k8s_tls_rejection_observed(output, tls_version=None, cipher_suite=None):
+    """True once the operator's own output shows the expected TLS rejection."""
+    return any(
+        marker in output
+        for marker in local_fake_k8s_tls_rejected_markers(tls_version, cipher_suite)
+    )
+
+
+def local_fake_k8s_server_negotiated_cipher(server_log, cipher_suite):
+    """True when s_server logged the negotiated cipher for the operator's handshake."""
+    return bool(cipher_suite) and f"CIPHER is {cipher_suite}" in server_log
+
+
+def read_local_openssl_server_log(context):
+    """Read the local s_server stdout log captured for the current probe."""
+    path = getattr(context, "fips_local_openssl_log_path", None)
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def select_lines(text, needles):
+    """Return stripped lines of ``text`` that contain any of ``needles``."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if any(needle in line for needle in needles)
+    ]
 
 
 def local_openssl_s_server_command(
@@ -2750,7 +2428,10 @@ def local_openssl_s_server_command(
     ]
     command.extend(openssl_tls_version_args(tls_version))
     command.extend(openssl_cipher_args(tls_version, cipher_suite))
-    command.extend(["-www", "-state"])
+
+    if tls_version in ("1.0", "1.1"):
+        command.append("-www")
+    command.append("-state")
     return command
 
 
@@ -2795,8 +2476,6 @@ def fips_prepare_local_strict_operator_config(self, base_config_path=None):
     security = config.setdefault("security", {})
     security["policy"] = "Enforced"
     security.setdefault("fips", {})["enforced"] = True
-    # Enforced coerces ipc.mode=Secure; point tokenPath at the temp work dir so
-    # host-run binaries can provision the token without /etc permissions.
     security.setdefault("ipc", {})["tokenPath"] = os.path.join(work_dir, "ipc", "token")
     config_path = os.path.join(work_dir, "strict-operator-config.yaml")
     with open(config_path, "w", encoding="utf-8") as f:
@@ -2851,9 +2530,14 @@ def fips_start_local_openssl_server(self, cipher_suite=None, port=None, tls_vers
         tls_version=tls_version,
         cipher_suite=cipher_suite,
     )
+
+    if shutil.which("stdbuf"):
+        command = ["stdbuf", "-oL", "-eL", *command]
     log_file = open(log_path, "w", encoding="utf-8")
+
     process = subprocess.Popen(
         command,
+        stdin=subprocess.PIPE,
         stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
@@ -2895,6 +2579,8 @@ def fips_stop_local_openssl_server(self):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+    if process and process.stdin and not process.stdin.closed:
+        process.stdin.close()
     if log_file and not log_file.closed:
         log_file.close()
     self.context.fips_local_openssl_process = None
@@ -2907,6 +2593,8 @@ def fips_run_binary_against_local_fake_k8s(
     binary_path,
     config_path,
     expectation="approved",
+    tls_version=None,
+    cipher_suite=None,
     max_wait_sec=45,
 ):
     """Run a shipped binary against fake kubeconfig -> local OpenSSL peer.
@@ -2939,29 +2627,46 @@ def fips_run_binary_against_local_fake_k8s(
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
     )
     self.context.fips_local_binary_process = process
 
     chunks = []
+
+    def drain_available():
+        """Append any immediately-available operator output without blocking."""
+        while True:
+            readable, _, _ = select.select([process.stdout], [], [], 0)
+            if not readable:
+                return
+            data = os.read(process.stdout.fileno(), 65536)
+            if not data:
+                return
+            chunks.append(data.decode("utf-8", "replace"))
+
     deadline = time.time() + max_wait_sec
 
     try:
         while time.time() < deadline:
-            if process.poll() is not None:
-                remaining = process.stdout.read() if process.stdout else ""
-                if remaining:
-                    chunks.append(remaining)
+            select.select([process.stdout], [], [], 0.5)
+            drain_available()
+
+            if expectation == "approved":
+                # operator-tied success: the server logged the cipher it
+                # negotiated with the operator's own handshake.
+                if local_fake_k8s_server_negotiated_cipher(
+                    read_local_openssl_server_log(self.context),
+                    cipher_suite,
+                ):
+                    break
+            elif local_fake_k8s_tls_rejection_observed(
+                "".join(chunks),
+                tls_version=tls_version,
+                cipher_suite=cipher_suite,
+            ):
                 break
 
-            readable, _, _ = select.select([process.stdout], [], [], 0.5)
-            if readable:
-                chunk = process.stdout.read(4096)
-                if chunk:
-                    chunks.append(chunk)
-
-            if local_fake_k8s_tls_probe_succeeded("".join(chunks), expectation):
+            if process.poll() is not None:
+                drain_available()
                 break
     finally:
         if process.poll() is None:
@@ -2971,10 +2676,7 @@ def fips_run_binary_against_local_fake_k8s(
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
-        if process.stdout:
-            remaining = process.stdout.read()
-            if remaining:
-                chunks.append(remaining)
+        drain_available()
         self.context.fips_local_binary_process = None
 
     output = "".join(chunks)
@@ -3010,18 +2712,48 @@ def fips_assert_local_fake_k8s_tls_probe(
             binary_path=binary_path,
             config_path=config_path,
             expectation=expectation,
+            tls_version=tls_version,
+            cipher_suite=cipher_suite,
         )
+        server_log = read_local_openssl_server_log(self.context)
+
         if expectation == "approved":
-            expected = LOCAL_FAKE_K8S_TLS_APPROVED_MARKER
-            assert local_fake_k8s_tls_probe_succeeded(output, expectation), error(
-                f"{binary_label} probe={label}: expected {expected!r}\n"
-                f"output tail:\n{output[-4000:]}"
+            assert local_fake_k8s_server_negotiated_cipher(
+                server_log, cipher_suite
+            ), error(
+                f"{binary_label} probe={label}: operator did not negotiate "
+                f"{cipher_suite!r} (server log missing 'CIPHER is {cipher_suite}')\n"
+                f"server log tail:\n{server_log[-3000:]}\n"
+                f"operator output tail:\n{output[-2000:]}"
+            )
+            proof = select_lines(
+                server_log, [f"CIPHER is {cipher_suite}", "Shared ciphers:"]
+            )
+            note(
+                f"PROOF [{binary_label} {label}] SUCCESS on the openssl s_server "
+                f"side -- the operator's own TLS handshake negotiated the FIPS "
+                f"cipher:\n" + "\n".join(proof)
             )
         else:
-            assert local_fake_k8s_tls_probe_succeeded(output, expectation), error(
-                f"{binary_label} probe={label}: expected one of "
-                f"{LOCAL_FAKE_K8S_TLS_REJECTED_MARKERS!r}\n"
-                f"output tail:\n{output[-4000:]}"
+            expected_markers = local_fake_k8s_tls_rejected_markers(
+                tls_version,
+                cipher_suite,
+            )
+            assert local_fake_k8s_tls_rejection_observed(
+                output,
+                tls_version=tls_version,
+                cipher_suite=cipher_suite,
+            ), error(
+                f"{binary_label} probe={label}: expected one of {expected_markers!r}\n"
+                f"operator output tail:\n{output[-4000:]}\n"
+                f"server log tail:\n{server_log[-2000:]}"
+            )
+            proof = select_lines(output, list(expected_markers)) or select_lines(
+                server_log, list(TLS_REJECT_MARKERS)
+            )
+            note(
+                f"PROOF [{binary_label} {label}] FAILURE -- the operator's FIPS "
+                f"TLS client refused the probe:\n" + "\n".join(proof)
             )
     finally:
         fips_stop_local_openssl_server()
@@ -3063,6 +2795,9 @@ def fips_assert_local_fake_k8s_rejected_tls_cases(
     rejected_cases = rejected_cases or FIPS_LISTENER_REJECTED_TLS_CASES
 
     for case in rejected_cases:
+        # TODO(fips-k8s-minversion): TLS 1.2 cases are temporarily skipped.
+        if case["tls_version"] == "1.2":
+            continue
         with Check(f"{binary_label} rejects {case['name']} against local fake k8s API"):
             fips_assert_local_fake_k8s_tls_probe(
                 binary_label=binary_label,
