@@ -15,9 +15,7 @@
 package chop
 
 import (
-	"crypto/tls"
 	"fmt"
-	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -32,7 +30,6 @@ import (
 	log "github.com/altinity/clickhouse-operator/pkg/announcer"
 	"github.com/altinity/clickhouse-operator/pkg/apis/deployment"
 	chopclientset "github.com/altinity/clickhouse-operator/pkg/client/clientset/versioned"
-	"github.com/altinity/clickhouse-operator/pkg/util/tlsutil"
 )
 
 // lastKubeConfigInsecure records whether the most recently loaded kubeconfig
@@ -40,56 +37,6 @@ import (
 // post-file-load gate inside ConfigManager.Init can decide whether to fail
 // fast based on security.kubernetes.tls.verify.
 var lastKubeConfigInsecure bool
-
-// applyK8sClientTLSFloor floors the Kubernetes-API client transport at the
-// requested minimum TLS version. client-go's rest.TLSClientConfig exposes no
-// MinVersion field and its transport hardcodes MinVersion=TLS12, so the only
-// lever is WrapTransport: the wrapper runs before any auth round-trippers and
-// receives the raw *http.Transport, whose TLSClientConfig.MinVersion we raise.
-// A no-op when minVersion is empty/unknown ("" -> 0), preserving the default
-// (Permissive) posture untouched.
-func applyK8sClientTLSFloor(conf *kuberest.Config, minVersion string) {
-	floor := tlsutil.VersionUint16(minVersion)
-	if (conf == nil) || (floor == 0) {
-		return
-	}
-	inner := conf.WrapTransport
-	conf.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
-		if inner != nil {
-			rt = inner(rt)
-		}
-		if tr, ok := rt.(*http.Transport); ok {
-			if tr.TLSClientConfig == nil {
-				tr.TLSClientConfig = &tls.Config{}
-			}
-			if tr.TLSClientConfig.MinVersion < floor {
-				tr.TLSClientConfig.MinVersion = floor
-			}
-		}
-		return rt
-	}
-	log.F().Info("K8s API client TLS floor: MinVersion=%s", minVersion)
-}
-
-// ApplyK8sClientMinTLSVersion hardens an externally-built rest.Config (e.g.
-// controller-runtime's GetConfigOrDie) using the resolved operator security
-// posture. Callable only after chop.Config() is loaded.
-func ApplyK8sClientMinTLSVersion(conf *kuberest.Config) {
-	applyK8sClientTLSFloor(conf, Config().K8sClientMinTLSVersion())
-}
-
-// resolveK8sClientMinTLSVersion reads the file-based operator config (no kube
-// access, no normalize) to determine the K8s-client TLS floor at clientset
-// construction time — the same file-config-wins philosophy as the
-// RequiresStrictK8sTLS insecure-kubeconfig startup gate.
-func resolveK8sClientMinTLSVersion(chopConfigFile string) string {
-	cm := newConfigManager(nil, nil, chopConfigFile)
-	conf, err := cm.getFileBasedConfig(chopConfigFile)
-	if (err != nil) || (conf == nil) {
-		return ""
-	}
-	return conf.K8sClientMinTLSVersion()
-}
 
 // captureInsecure records the Insecure flag on conf (if non-nil). Returns
 // conf+err unchanged so callers can chain it onto BuildConfigFromFlags/
@@ -134,7 +81,7 @@ func getKubeConfig(kubeConfigFile, masterURL string) (*kuberest.Config, error) {
 }
 
 // GetClientset gets k8s API clients - both kube native client and our custom client
-func GetClientset(kubeConfigFile, masterURL, chopConfigFile string) (
+func GetClientset(kubeConfigFile, masterURL string) (
 	*kube.Clientset,
 	*apiextensions.Clientset,
 	*chopclientset.Clientset,
@@ -145,11 +92,6 @@ func GetClientset(kubeConfigFile, masterURL, chopConfigFile string) (
 		log.F().Fatal("Unable to build kubeconf: %s", err.Error())
 		os.Exit(1)
 	}
-
-	// Floor the K8s-API client TLS at the version demanded by the file-based
-	// security posture (1.3 under Enforced/FIPS). Must happen before the
-	// clientsets below build their (eager) transports.
-	applyK8sClientTLSFloor(kubeConfig, resolveK8sClientMinTLSVersion(chopConfigFile))
 
 	// Layer on k8s client rate limiting overrides if specified in CHOP config.
 	if maybeQps := os.Getenv(deployment.OPERATOR_K8S_CLIENT_QPS_LIMIT); maybeQps != "" {

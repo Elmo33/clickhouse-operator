@@ -51,12 +51,7 @@ func initKeeper(ctx context.Context) error {
 	for _, ns := range chop.Config().GetCacheNamespaces() {
 		defaultNamespaces[ns] = cache.Config{}
 	}
-	keeperKubeConfig := ctrlRuntime.GetConfigOrDie()
-	// Floor the controller-runtime K8s-API transport at the same TLS version as
-	// the client-go clients (1.3 under Enforced/FIPS). chop.Config() is loaded
-	// by this point (launchClickHouse runs before launchKeeper).
-	chop.ApplyK8sClientMinTLSVersion(keeperKubeConfig)
-	manager, err = ctrlRuntime.NewManager(keeperKubeConfig, ctrlRuntime.Options{
+	manager, err = ctrlRuntime.NewManager(ctrlRuntime.GetConfigOrDie(), ctrlRuntime.Options{
 		Scheme: scheme,
 		Cache: cache.Options{
 			// GetCacheNamespaces returns exact namespace names when all configured watch namespaces are
@@ -80,7 +75,7 @@ func initKeeper(ctx context.Context) error {
 
 	// Build the apiextensions client for CRD deletion checks during CHK cleanup.
 	// Uses the same kubeConfigFile/masterURL package vars as the CHI thread.
-	_, extClient, _, _ := chop.GetClientset(kubeConfigFile, masterURL, chopConfigFile)
+	_, extClient, _, _ := chop.GetClientset(kubeConfigFile, masterURL)
 
 	err = ctrlRuntime.
 		NewControllerManagedBy(manager).
