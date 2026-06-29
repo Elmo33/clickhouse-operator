@@ -8650,7 +8650,12 @@ def test_030009(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
 )
 def test_030017(self):
-    """check outbound connections of operator and exporter Host-run FIPS binaries against local openssl s_server via fake kubeconfig."""
+    """Host-run operator and metrics-exporter against a local openssl s_server fake K8s API.
+
+    Uses a fake kubeconfig and strict FIPS config (Enforced, fips.enforced=true).
+    Approved cases pass when s_server logs ``CIPHER is <cipher>`` for the binary's
+    connection. Rejected cases pass when the binary logs a TLS handshake failure.
+    """
 
     with Given("operator and metrics-exporter binaries are extracted from shipped images"):
         fips_extract_shipped_binaries()
