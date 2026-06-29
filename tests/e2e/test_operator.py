@@ -8503,7 +8503,7 @@ def test_030008(self):
         fips_assert_chi_admitted(chi=chi_fips_suffix)
 
     with Finally("fips-suffix CHI admission-only resources are deleted"):
-        fips_cleanup_admission_only_chi(chi=chi_fips_suffix)
+        cleanup_admission_only_chi(chi=chi_fips_suffix)
 
     with When("CHI with uppercase FIPS image tag is applied"):
         fips_apply_manifest_raw(manifest_path=chi_case_insensitive_manifest)
@@ -8512,7 +8512,7 @@ def test_030008(self):
         fips_assert_chi_admitted(chi=chi_case_insensitive)
 
     with Finally("case-insensitive CHI admission-only resources are deleted"):
-        fips_cleanup_admission_only_chi(chi=chi_case_insensitive)
+        cleanup_admission_only_chi(chi=chi_case_insensitive)
 
     with When("runtime decoy image alias is prepared"):
         decoy_tag = "altinity/clickhouse-server:25.8.16.10002.altinityfips-decoy"
@@ -8650,39 +8650,48 @@ def test_030009(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
 )
 def test_030017(self):
-    """Host-run FIPS binaries against local openssl s_server via fake kubeconfig.
-
-    Complements test_030010 (in-pod curl probes) using the same approved/rejected case lists.
-    """
+    """Host-run FIPS binaries against local openssl s_server via fake kubeconfig."""
     with Given("operator and metrics-exporter binaries are extracted from shipped images"):
         fips_extract_shipped_binaries()
 
     with And("local OpenSSL TLS material is prepared"):
-        fips_prepare_local_openssl_tls_material()
-        self.context.cleanup(fips_cleanup_local_openssl_tls_material)
+        prepare_local_openssl_tls_material()
+        self.context.cleanup(cleanup_local_openssl_tls_material)
 
     with And("strict FIPS operator config is prepared for host-run probes"):
-        fips_prepare_local_strict_operator_config()
+        prepare_local_strict_operator_config()
 
     config_path = self.context.fips_local_strict_config_path
+    op_bin = self.context.fips_op_bin
+    me_bin = self.context.fips_me_bin
 
-    for binary_label, binary_path in (
-        ("clickhouse-operator", self.context.fips_op_bin),
-        ("metrics-exporter", self.context.fips_me_bin),
-    ):
-        with Check(f"{binary_label} approved TLS 1.3 ciphers against local fake k8s API"):
-            fips_assert_local_fake_k8s_approved_tls_cases(
-                binary_label=binary_label,
-                binary_path=binary_path,
-                config_path=config_path,
-            )
+    with Check("clickhouse-operator approved TLS 1.3 ciphers against local fake k8s API"):
+        assert_local_fake_k8s_approved_tls_cases(
+            binary_label="clickhouse-operator",
+            binary_path=op_bin,
+            config_path=config_path,
+        )
 
-        with Check(f"{binary_label} rejected TLS probes against local fake k8s API"):
-            fips_assert_local_fake_k8s_rejected_tls_cases(
-                binary_label=binary_label,
-                binary_path=binary_path,
-                config_path=config_path,
-            )
+    with Check("clickhouse-operator rejected TLS probes against local fake k8s API"):
+        assert_local_fake_k8s_rejected_tls_cases(
+            binary_label="clickhouse-operator",
+            binary_path=op_bin,
+            config_path=config_path,
+        )
+
+    with Check("metrics-exporter approved TLS 1.3 ciphers against local fake k8s API"):
+        assert_local_fake_k8s_approved_tls_cases(
+            binary_label="metrics-exporter",
+            binary_path=me_bin,
+            config_path=config_path,
+        )
+
+    with Check("metrics-exporter rejected TLS probes against local fake k8s API"):
+        assert_local_fake_k8s_rejected_tls_cases(
+            binary_label="metrics-exporter",
+            binary_path=me_bin,
+            config_path=config_path,
+        )
 
 
 @TestScenario

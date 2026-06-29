@@ -1104,43 +1104,6 @@ def openssl_cipher_args(tls_version, cipher_suite):
     return ["-cipher", cipher_suite]
 
 
-def fake_openssl_s_server_command(tls_version="1.3", cipher_suite=None):
-    """Build ``openssl s_server`` argv for the fake TLS server pod."""
-    command = [
-        "openssl", "s_server",
-        "-accept", "18443",
-        "-cert", "/tls/server.crt",
-        "-key", "/tls/server.key",
-    ]
-    command.extend(openssl_tls_version_args(tls_version))
-    command.extend(openssl_cipher_args(tls_version, cipher_suite))
-    command.extend(["-www", "-state"])
-    return command
-
-
-def curl_tls_version_args(tls_version, cipher_suite=None):
-    """Build curl TLS version/cipher flags for operator-container probes."""
-    if tls_version == "1.3":
-        args = ["--tlsv1.3"]
-        if cipher_suite:
-            args.extend(["--tls13-ciphers", cipher_suite])
-        return args
-
-    if tls_version == "1.2":
-        # --tlsv1.2 alone is a minimum; cap the max so curl cannot upgrade to 1.3.
-        args = ["--tls-max", "1.2", "--tlsv1.2"]
-    elif tls_version == "1.1":
-        args = ["--tls-max", "1.1", "--tlsv1.1"]
-    elif tls_version == "1.0":
-        args = ["--tls-max", "1.0", "--tlsv1.0"]
-    else:
-        raise ValueError(f"unsupported TLS version for curl: {tls_version}")
-
-    if cipher_suite:
-        args.extend(["--ciphers", cipher_suite])
-
-    return args
-
 
 def openssl_s_client_negotiated_cipher(output):
     """Return the negotiated cipher name when s_client completed a handshake."""
@@ -2347,7 +2310,7 @@ def check_tls13_cipher_fails(
     )
 
 @TestStep(Finally)
-def fips_cleanup_admission_only_chi(self, chi):
+def cleanup_admission_only_chi(self, chi):
     """Cleanup chi"""
     kubectl.launch(
         f"delete chi {chi} --ignore-not-found=true --wait=false",
@@ -2486,7 +2449,7 @@ def _run_fips_binary_until_tls_probe(
 
 
 @TestStep(Given)
-def fips_prepare_local_strict_operator_config(self, base_config_path=None):
+def prepare_local_strict_operator_config(self, base_config_path=None):
     """Operator config with security.policy=Enforced and security.fips.enforced=true."""
     with Given("strict FIPS operator config (Enforced, fips.enforced=true)"):
         base_config_path = base_config_path or util.get_full_path(
@@ -2511,7 +2474,7 @@ def fips_prepare_local_strict_operator_config(self, base_config_path=None):
 
 
 @TestStep(Given)
-def fips_prepare_local_openssl_tls_material(self):
+def prepare_local_openssl_tls_material(self):
     """Self-signed cert and key for local openssl s_server."""
     with Given("self-signed TLS cert and key for local s_server"):
         work_dir = tempfile.mkdtemp(prefix="fips-local-openssl-tls-")
@@ -2537,16 +2500,16 @@ def fips_prepare_local_openssl_tls_material(self):
 
 
 @TestStep(Finally)
-def fips_cleanup_local_openssl_tls_material(self):
+def cleanup_local_openssl_tls_material(self):
     work_dir = getattr(self.context, "fips_local_openssl_tls_dir", None)
     if work_dir and os.path.isdir(work_dir):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @TestStep(When)
-def fips_start_local_openssl_server(self, cipher_suite=None, port=None, tls_version="1.3"):
+def start_local_openssl_server(self, cipher_suite=None, tls_version="1.3"):
     """Start openssl s_server on localhost as a fake Kubernetes API."""
-    port = port or _free_local_port()
+    port = _free_local_port()
     log_path = os.path.join(self.context.fips_local_openssl_tls_dir, "s_server.log")
 
     with Given(f"openssl s_server on 127.0.0.1:{port} (TLS {tls_version})"):
@@ -2558,6 +2521,7 @@ def fips_start_local_openssl_server(self, cipher_suite=None, port=None, tls_vers
         ]
         command.extend(openssl_tls_version_args(tls_version))
         command.extend(openssl_cipher_args(tls_version, cipher_suite))
+
         if tls_version in ("1.0", "1.1"):
             command.append("-www")
         command.append("-state")
@@ -2598,11 +2562,14 @@ def fips_start_local_openssl_server(self, cipher_suite=None, port=None, tls_vers
     self.context.fips_local_openssl_log_file = log_file
     self.context.fips_local_openssl_log_path = log_path
     self.context.fips_local_openssl_port = port
-    return port
 
+    yield port
+
+    with Finally("stop local openssl server"):
+        stop_local_openssl_server()
 
 @TestStep(Finally)
-def fips_stop_local_openssl_server(self):
+def stop_local_openssl_server(self):
     process = getattr(self.context, "fips_local_openssl_process", None)
     log_file = getattr(self.context, "fips_local_openssl_log_file", None)
     if process and process.poll() is None:
@@ -2621,7 +2588,7 @@ def fips_stop_local_openssl_server(self):
 
 
 @TestStep(When)
-def fips_run_binary_against_local_fake_k8s(
+def run_binary_against_local_fake_k8s(
     self,
     binary_path,
     config_path,
@@ -2655,7 +2622,7 @@ def fips_run_binary_against_local_fake_k8s(
 
 
 @TestStep(Then)
-def fips_assert_local_fake_k8s_tls_probe(
+def assert_local_fake_k8s_tls_probe(
     self,
     binary_label,
     binary_path,
@@ -2666,62 +2633,56 @@ def fips_assert_local_fake_k8s_tls_probe(
     case_name=None,
 ):
     """Start s_server, run binary once, assert negotiated cipher or TLS rejection."""
-    assert expectation in ("approved", "rejected"), error(
-        f"unsupported expectation: {expectation}"
-    )
+
     label = case_name or cipher_suite or f"TLS {tls_version} protocol"
 
-    try:
-        with Given(f"fake Kubernetes API ({label})"):
-            fips_start_local_openssl_server(
-                cipher_suite=cipher_suite,
-                tls_version=tls_version,
+    with Given(f"fake Kubernetes API ({label})"):
+        start_local_openssl_server(
+            cipher_suite=cipher_suite,
+            tls_version=tls_version,
+        )
+
+    with When(f"{binary_label} connects via fake kubeconfig"):
+        output = run_binary_against_local_fake_k8s(
+            binary_path=binary_path,
+            config_path=config_path,
+            expectation=expectation,
+            cipher_suite=cipher_suite,
+        )
+
+    with open(self.context.fips_local_openssl_log_path, encoding="utf-8", errors="replace") as f:
+        server_log = f.read()
+
+    if expectation == "approved":
+        with Then(f"{binary_label} negotiates {cipher_suite}"):
+            cipher_line = f"CIPHER is {cipher_suite}"
+            assert cipher_suite and cipher_line in server_log, error(
+                f"{binary_label} {label}: expected {cipher_suite!r} in server log\n"
+                f"server log tail:\n{server_log[-3000:]}\n"
+                f"binary output tail:\n{output[-2000:]}"
+            )
+    else:
+        with Then(f"{binary_label} rejects TLS handshake"):
+            assert any(err in output for err in FAKE_K8S_TLS_REJECT_ERRORS), error(
+                f"{binary_label} {label}: expected TLS rejection in binary output\n"
+                f"binary output tail:\n{output[-4000:]}\n"
+                f"server log tail:\n{server_log[-2000:]}"
             )
 
-        with When(f"{binary_label} connects via fake kubeconfig"):
-            output = fips_run_binary_against_local_fake_k8s(
-                binary_path=binary_path,
-                config_path=config_path,
-                expectation=expectation,
-                cipher_suite=cipher_suite,
-            )
-
-        with open(self.context.fips_local_openssl_log_path, encoding="utf-8", errors="replace") as f:
-            server_log = f.read()
-
-        if expectation == "approved":
-            with Then(f"{binary_label} negotiates {cipher_suite}"):
-                cipher_line = f"CIPHER is {cipher_suite}"
-                assert cipher_suite and cipher_line in server_log, error(
-                    f"{binary_label} {label}: expected {cipher_suite!r} in server log\n"
-                    f"server log tail:\n{server_log[-3000:]}\n"
-                    f"operator output tail:\n{output[-2000:]}"
-                )
-        else:
-            with Then(f"{binary_label} rejects TLS handshake"):
-                assert any(err in output for err in FAKE_K8S_TLS_REJECT_ERRORS), error(
-                    f"{binary_label} {label}: expected TLS rejection in operator output\n"
-                    f"operator output tail:\n{output[-4000:]}\n"
-                    f"server log tail:\n{server_log[-2000:]}"
-                )
-    finally:
-        fips_stop_local_openssl_server()
 
 
 @TestStep(Check)
-def fips_assert_local_fake_k8s_approved_tls_cases(
+def assert_local_fake_k8s_approved_tls_cases(
     self,
     binary_label,
     binary_path,
     config_path,
-    approved_cases=None,
 ):
     """Run all FIPS_APPROVED_TLS13_CIPHER_CASES against the local fake API."""
-    approved_cases = approved_cases or FIPS_APPROVED_TLS13_CIPHER_CASES
 
-    for case in approved_cases:
+    for case in FIPS_APPROVED_TLS13_CIPHER_CASES:
         with Check(f"{binary_label} accepts {case['name']} against local fake k8s API"):
-            fips_assert_local_fake_k8s_tls_probe(
+            assert_local_fake_k8s_tls_probe(
                 binary_label=binary_label,
                 binary_path=binary_path,
                 config_path=config_path,
@@ -2733,22 +2694,20 @@ def fips_assert_local_fake_k8s_approved_tls_cases(
 
 
 @TestStep(Check)
-def fips_assert_local_fake_k8s_rejected_tls_cases(
+def assert_local_fake_k8s_rejected_tls_cases(
     self,
     binary_label,
     binary_path,
     config_path,
-    rejected_cases=None,
 ):
     """Run all FIPS_LISTENER_REJECTED_TLS_CASES against the local fake API."""
-    rejected_cases = rejected_cases or FIPS_LISTENER_REJECTED_TLS_CASES
 
-    for case in rejected_cases:
+    for case in FIPS_LISTENER_REJECTED_TLS_CASES:
         # Operator K8s client min TLS is 1.3; 1.2 probes are not meaningful yet.
         if case["tls_version"] == "1.2":
             continue
         with Check(f"{binary_label} rejects {case['name']} against local fake k8s API"):
-            fips_assert_local_fake_k8s_tls_probe(
+            assert_local_fake_k8s_tls_probe(
                 binary_label=binary_label,
                 binary_path=binary_path,
                 config_path=config_path,
