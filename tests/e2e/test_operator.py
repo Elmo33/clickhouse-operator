@@ -8657,7 +8657,6 @@ def test_030017(self):
 
     with And("local OpenSSL TLS material is prepared"):
         prepare_local_openssl_tls_material()
-        self.context.cleanup(cleanup_local_openssl_tls_material)
 
     with And("strict FIPS operator config is prepared for host-run probes"):
         prepare_local_strict_operator_config()

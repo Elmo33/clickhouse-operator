@@ -2528,6 +2528,9 @@ def prepare_local_openssl_tls_material(self):
         self.context.fips_local_openssl_cert = cert_path
         self.context.fips_local_openssl_key = key_path
 
+    yield
+
+    cleanup_local_openssl_tls_material()
 
 @TestStep(Finally)
 def cleanup_local_openssl_tls_material(self):
