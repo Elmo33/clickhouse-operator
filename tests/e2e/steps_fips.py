@@ -2366,6 +2366,36 @@ def _fake_k8s_probe_env(work_dir, port, ca_cert_path):
     return env
 
 
+_FAKE_K8S_PROBE_NOTE_MARKERS = (
+    "Starting clickhouse-operator",
+    "Starting metrics exporter",
+    "kubeconfig auth source:",
+    "FIPS:",
+    "FIPS env:",
+    "CIPHER is ",
+    *FAKE_K8S_TLS_REJECT_ERRORS,
+)
+
+
+def _format_fake_k8s_probe_note(output, max_lines=50):
+    """Return a compact note for local fake-k8s probe runs.
+
+    Keeps only TLS/FIPS-relevant lines and trims noisy config dumps.
+    """
+    selected = []
+    for line in output.splitlines():
+        if any(marker in line for marker in _FAKE_K8S_PROBE_NOTE_MARKERS):
+            selected.append(line)
+
+    if not selected:
+        tail = output.splitlines()[-20:]
+        return "\n".join(tail)
+
+    if len(selected) > max_lines:
+        selected = [f"... truncated, showing last {max_lines} relevant lines ..."] + selected[-max_lines:]
+    return "\n".join(selected)
+
+
 def _read_available_stdout(pipe, timeout=0):
     readable, _, _ = select.select([pipe], [], [], timeout)
     if not readable:
@@ -2449,10 +2479,10 @@ def _run_fips_binary_until_tls_probe(
 
 
 @TestStep(Given)
-def prepare_local_strict_operator_config(self, base_config_path=None):
+def prepare_local_strict_operator_config(self):
     """Operator config with security.policy=Enforced and security.fips.enforced=true."""
     with Given("strict FIPS operator config (Enforced, fips.enforced=true)"):
-        base_config_path = base_config_path or util.get_full_path(
+        base_config_path = util.get_full_path(
             "../../config/config.yaml", lookup_in_host=True
         )
         with open(base_config_path, encoding="utf-8") as f:
@@ -2563,10 +2593,7 @@ def start_local_openssl_server(self, cipher_suite=None, tls_version="1.3"):
     self.context.fips_local_openssl_log_path = log_path
     self.context.fips_local_openssl_port = port
 
-    yield port
-
-    with Finally("stop local openssl server"):
-        stop_local_openssl_server()
+    return port
 
 @TestStep(Finally)
 def stop_local_openssl_server(self):
@@ -2617,7 +2644,7 @@ def run_binary_against_local_fake_k8s(
         self.context.fips_local_binary_process = None
         self.context.fips_local_binary_output = output
         self.context.fips_local_binary_exit_code = process.returncode
-        note(output)
+        note(_format_fake_k8s_probe_note(output))
     return output
 
 
@@ -2641,34 +2668,32 @@ def assert_local_fake_k8s_tls_probe(
             cipher_suite=cipher_suite,
             tls_version=tls_version,
         )
-
-    with When(f"{binary_label} connects via fake kubeconfig"):
-        output = run_binary_against_local_fake_k8s(
-            binary_path=binary_path,
-            config_path=config_path,
-            expectation=expectation,
-            cipher_suite=cipher_suite,
-        )
-
-    with open(self.context.fips_local_openssl_log_path, encoding="utf-8", errors="replace") as f:
-        server_log = f.read()
-
-    if expectation == "approved":
-        with Then(f"{binary_label} negotiates {cipher_suite}"):
-            cipher_line = f"CIPHER is {cipher_suite}"
-            assert cipher_suite and cipher_line in server_log, error(
-                f"{binary_label} {label}: expected {cipher_suite!r} in server log\n"
-                f"server log tail:\n{server_log[-3000:]}\n"
-                f"binary output tail:\n{output[-2000:]}"
-            )
-    else:
-        with Then(f"{binary_label} rejects TLS handshake"):
-            assert any(err in output for err in FAKE_K8S_TLS_REJECT_ERRORS), error(
-                f"{binary_label} {label}: expected TLS rejection in binary output\n"
-                f"binary output tail:\n{output[-4000:]}\n"
-                f"server log tail:\n{server_log[-2000:]}"
+    try:
+        with When(f"{binary_label} connects via fake kubeconfig"):
+            output = run_binary_against_local_fake_k8s(
+                binary_path=binary_path,
+                config_path=config_path,
+                expectation=expectation,
+                cipher_suite=cipher_suite,
             )
 
+        with open(self.context.fips_local_openssl_log_path, encoding="utf-8", errors="replace") as f:
+            server_log = f.read()
+
+        if expectation == "approved":
+            with Then(f"check {binary_label} negotiates {cipher_suite} by logging 'CIPHER IS {cipher_suite}'"):
+                cipher_line = f"CIPHER is {cipher_suite}"
+                assert cipher_suite and cipher_line in server_log, error(
+                    f"{binary_label} {label}: expected {cipher_suite!r} in server log, but none found"
+                )
+        else:
+            with Then(f"{binary_label} rejects TLS handshake"):
+                assert any(err in output for err in FAKE_K8S_TLS_REJECT_ERRORS), error(
+                    f"{binary_label} {label}: expected TLS rejection in binary output, but none found"
+                )
+    finally:
+        with Finally("stop local openssl server"):
+            stop_local_openssl_server()
 
 
 @TestStep(Check)
