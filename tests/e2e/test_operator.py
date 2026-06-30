@@ -8621,7 +8621,7 @@ def test_030009(self):
             expected_status="InProgress",
         )
 
-    with Check("operator rejects CHI because TLS 1.3 cannot be negotiated"):
+    with Check("operator and metrics-exporter reject CHI because TLS 1.3 cannot be negotiated"):
         fips_assert_chi_tls_rejected(
             chi=chi_tls12,
             min_version="1.3",

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 import re
 import select
@@ -1932,57 +1933,26 @@ def check_external_clickhouse_reports_fips_version(self, pod):
         f"expected FIPS in ClickHouse version(), got {version!r}"
     )
 
-@TestStep(Then)
-def fips_assert_operator_tls_rejection_in_logs(
-    self,
-    workload,
-    min_version="1.3",
-    rejection="remote error: tls: protocol version not supported",
-    operator_namespace=None,
-    max_iters=60,
-    sleep_s=5,
-):
-    """Poll operator logs until the expected TLS version rejection is observed."""
-
-    operator_namespace = operator_namespace or current().context.operator_namespace
-
+def _fips_tls_rejection_present_in_logs(logs, min_version, rejection):
+    """Return True when logs contain coerced TLS setup and a connect rejection."""
     expected_setup_parts = (
         "setupTLSAdvanced():TLS setup OK",
         f"minVersion={min_version}",
     )
+    setup_found = any(
+        all(part in line for part in expected_setup_parts)
+        for line in logs.splitlines()
+    )
+    rejection_found = any(
+        "connect():FAILED" in line and rejection in line
+        for line in logs.splitlines()
+    )
+    return setup_found and rejection_found
 
-    last_logs = ""
 
-    for attempt in range(max_iters):
-        operator_pod = kubectl.get_operator_pod(ns=operator_namespace)
-        last_logs = get_container_logs(
-            pod=operator_pod,
-            container="clickhouse-operator",
-            ns=operator_namespace,
-        )
-
-        setup_found = any(
-            all(part in line for part in expected_setup_parts)
-            for line in last_logs.splitlines()
-        )
-
-        rejection_found = any(
-            "connect():FAILED" in line and rejection in line
-            for line in last_logs.splitlines()
-        )
-
-        if setup_found and rejection_found:
-            note(
-                f"{workload}: observed TLS version rejection "
-                f"after attempt {attempt + 1}/{max_iters}"
-            )
-            return
-
-        if attempt + 1 < max_iters:
-            time.sleep(sleep_s)
-
-    matching_lines = "\n".join(
-        line for line in last_logs.splitlines()
+def _fips_tls_rejection_log_excerpt(logs):
+    return "\n".join(
+        line for line in logs.splitlines()
         if (
             "setupTLSAdvanced()" in line
             or "connect():FAILED" in line
@@ -1991,12 +1961,254 @@ def fips_assert_operator_tls_rejection_in_logs(
         )
     )
 
+
+# Distroless operator/exporter images ship sh/curl only (no cat/base64). Read the
+# IPC token with POSIX shell builtins — same file both containers mount.
+_IPC_TOKEN_READ_SHELL = (
+    'TOKEN=""; '
+    'while IFS= read -r line || [ -n "$line" ]; do TOKEN="${TOKEN}${line}"; done '
+    "< /etc/clickhouse-operator-ipc/token"
+)
+
+
+def _kubectl_pod_exec_stdin(ns, pod, container, shell_script, stdin=None, timeout=120):
+    """kubectl exec -i … sh -c <script>, optionally piping stdin to the container."""
+    cmd = shlex.split(current().context.kubectl_cmd) + [
+        "exec",
+        "-i",
+        f"--namespace={ns}",
+        pod,
+        "-c",
+        container,
+        "--",
+        "sh",
+        "-c",
+        shell_script,
+    ]
+    result = subprocess.run(
+        cmd,
+        input=stdin,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(f"kubectl exec failed, command:\n{' '.join(cmd)}")
+        print(f"exit code: {result.returncode}")
+        print(f"stdout:\n{result.stdout}")
+        print(f"stderr:\n{result.stderr}")
+        assert result.returncode == 0, error()
+    return result.stdout
+
+
+def _chi_service_name_from_pod(pod):
+    """Return per-host StatefulSet Service name (operator FQDN host part, not pod name)."""
+    # Pod chi-{chi}-default-{shard}-{replica}-0 → Service chi-{chi}-default-{shard}-{replica}
+    if pod.endswith("-0"):
+        return pod[:-2]
+    return pod
+
+
+def _chi_host_fqdn_from_pod(pod, ns):
+    """Return host FQDN as the operator sets host.Runtime.Address.FQDN."""
+    return f"{_chi_service_name_from_pod(pod)}.{ns}.svc.cluster.local."
+
+
+def _chi_host_name_from_pod(pod, chi):
+    """Return shard-replica host label from a CHI pod name."""
+    prefix = f"chi-{chi}-default-"
+    if pod.startswith(prefix) and pod.endswith("-0"):
+        return pod[len(prefix):-2]
+    return pod.removeprefix(f"chi-{chi}-default-")
+
+
+def _build_metrics_exporter_chi_payload(chi, ns, pods, https_port=8443):
+    hosts = []
+    for pod in pods:
+        hosts.append({
+            "name": _chi_host_name_from_pod(pod, chi),
+            "hostname": _chi_host_fqdn_from_pod(pod, ns),
+            "httpsPort": https_port,
+        })
+    return {
+        "type": "cr",
+        "cr": {
+            "namespace": ns,
+            "name": chi,
+            "labels": {},
+            "annotations": {},
+            "clusters": [{"name": "default", "hosts": hosts}],
+        },
+    }
+
+
+@TestStep(When)
+def register_chi_hosts_with_metrics_exporter(
+    self,
+    chi,
+    ns=None,
+    operator_namespace=None,
+    metrics_port=8888,
+    https_port=8443,
+):
+    """POST /chi so metrics-exporter knows HTTPS hosts when operator IPC does not.
+
+    Injects a WatchedCR with httpsPort only. FIPS-enforced config uses Secure IPC,
+    so the request must include X-CHOP-Token from the shared volume.
+    """
+    ns = ns or self.context.test_namespace
+    operator_namespace = operator_namespace or current().context.operator_namespace
+    operator_pod = kubectl.get_operator_pod(ns=operator_namespace)
+    pods = sorted(kubectl.get_pod_names(chi, ns=ns))
+    assert pods, error(f"no pods found for CHI {chi} in namespace {ns}")
+
+    payload = _build_metrics_exporter_chi_payload(
+        chi=chi,
+        ns=ns,
+        pods=pods,
+        https_port=https_port,
+    )
+    body = json.dumps(payload, separators=(",", ":"))
+
+    with When(f"register {chi} HTTPS hosts with metrics-exporter via POST /chi"):
+        post_script = (
+            f"{_IPC_TOKEN_READ_SHELL}; "
+            f"curl -sS -o /dev/null -w '%{{http_code}}' "
+            f"-X POST http://127.0.0.1:{metrics_port}/chi "
+            f"-H 'Content-Type: application/json' "
+            f"-H \"X-CHOP-Token: ${{TOKEN}}\" "
+            f"-d @-"
+        )
+        code = _kubectl_pod_exec_stdin(
+            ns=operator_namespace,
+            pod=operator_pod,
+            container="metrics-exporter",
+            shell_script=post_script,
+            stdin=body,
+        ).strip()
+        assert code == "200", error(
+            f"metrics-exporter POST /chi failed for {chi}: HTTP {code!r}\n"
+            f"payload hosts: {pods}\nbody: {body}"
+        )
+
+
+@TestStep(When)
+def trigger_metrics_exporter_collect(self, operator_namespace=None, metrics_port=8888):
+    """Scrape /metrics so metrics-exporter dials registered ClickHouse HTTPS hosts."""
+    operator_namespace = operator_namespace or current().context.operator_namespace
+    operator_pod = kubectl.get_operator_pod(ns=operator_namespace)
+
+    with When(f"scrape metrics-exporter /metrics on 127.0.0.1:{metrics_port}"):
+        code = kubectl.launch(
+            f"exec {operator_pod} -c metrics-exporter -- "
+            f"curl -sS -o /dev/null -w %{{http_code}} "
+            f"http://127.0.0.1:{metrics_port}/metrics",
+            ns=operator_namespace,
+        )
+        assert code == "200", error(
+            f"metrics-exporter /metrics scrape failed: HTTP {code!r}"
+        )
+
+
+@TestStep(Then)
+def fips_poll_tls_rejection_in_logs(
+    self,
+    workload,
+    containers,
+    min_version="1.3",
+    rejection="remote error: tls: protocol version not supported",
+    operator_namespace=None,
+    trigger_metrics_exporter=False,
+    chi=None,
+    max_iters=60,
+    sleep_s=5,
+):
+    """Poll selected operator-pod containers until TLS version rejection appears."""
+    operator_namespace = operator_namespace or current().context.operator_namespace
+    expected_setup_parts = (
+        "setupTLSAdvanced():TLS setup OK",
+        f"minVersion={min_version}",
+    )
+    last_logs_by_container = {container: "" for container in containers}
+
+    for attempt in range(max_iters):
+        if trigger_metrics_exporter:
+            with When("metrics-exporter collect is triggered via /metrics scrape"):
+                if chi:
+                    with When(f"metrics-exporter is registered with CHI {chi} HTTPS hosts"):
+                        register_chi_hosts_with_metrics_exporter(chi=chi)
+                trigger_metrics_exporter_collect(
+                    operator_namespace=operator_namespace,
+                )
+
+        operator_pod = kubectl.get_operator_pod(ns=operator_namespace)
+        container_results = {}
+
+        for container in containers:
+            with Then(f"tail logs from {container}"):
+                logs = get_container_logs(
+                    pod=operator_pod,
+                    container=container,
+                    ns=operator_namespace,
+                )
+                last_logs_by_container[container] = logs
+                container_results[container] = _fips_tls_rejection_present_in_logs(
+                    logs,
+                    min_version=min_version,
+                    rejection=rejection,
+                )
+
+        if all(container_results.values()):
+            note(
+                f"{workload}: observed TLS version rejection in "
+                f"{', '.join(containers)} after attempt {attempt + 1}/{max_iters}"
+            )
+            return
+
+        if attempt + 1 < max_iters:
+            time.sleep(sleep_s)
+
+    matching_sections = [
+        f"{container}:\n{_fips_tls_rejection_log_excerpt(last_logs_by_container[container]) or '(none)'}"
+        for container in containers
+    ]
+
     assert False, error(
-        f"{workload}: expected TLS version rejection not found\n"
+        f"{workload}: expected TLS version rejection not found in all containers\n"
+        f"containers: {', '.join(containers)}\n"
         f"expected setup line parts: {expected_setup_parts}\n"
         f"expected rejection: {rejection}\n\n"
-        f"matching log lines:\n{matching_lines or '(none)'}"
+        f"matching log lines:\n" + "\n\n".join(matching_sections)
     )
+
+
+@TestStep(Then)
+def fips_assert_operator_tls_rejection_in_logs(
+    self,
+    workload,
+    min_version="1.3",
+    rejection="remote error: tls: protocol version not supported",
+    operator_namespace=None,
+    containers=("clickhouse-operator",),
+    trigger_metrics_exporter=False,
+    chi=None,
+    max_iters=60,
+    sleep_s=5,
+):
+    """Assert operator pod containers log TLS min-version rejection."""
+    with Given(f"workload {workload} must reject TLS below {min_version}"):
+        fips_poll_tls_rejection_in_logs(
+            workload=workload,
+            containers=containers,
+            min_version=min_version,
+            rejection=rejection,
+            operator_namespace=operator_namespace,
+            trigger_metrics_exporter=trigger_metrics_exporter,
+            chi=chi,
+            max_iters=max_iters,
+            sleep_s=sleep_s,
+        )
 
 @TestStep(Then)
 def fips_assert_chi_tls_rejected(
@@ -2006,24 +2218,30 @@ def fips_assert_chi_tls_rejected(
     min_version="1.3",
 ):
     """Assert CHI remains unfinished because operator TLS client rejects server TLS policy."""
-    kubectl.wait_object(
-        "pod",
-        "",
-        label=f"-l clickhouse.altinity.com/chi={chi}",
-        count=1,
-    )
+    with When(f"CHI {chi} pod is running"):
+        kubectl.wait_object(
+            "pod",
+            "",
+            label=f"-l clickhouse.altinity.com/chi={chi}",
+            count=1,
+        )
 
-    status = kubectl.get_chi_status(chi)
-    assert status != "Completed", error(
-        f"CHI {chi} reached Completed; expected operator TLS client to reject the server"
-    )
-    if status != expected_status:
-        kubectl.wait_chi_status(chi, expected_status)
+    with Then(f"CHI {chi} does not complete reconciliation"):
+        status = kubectl.get_chi_status(chi)
+        assert status != "Completed", error(
+            f"CHI {chi} reached Completed; expected operator TLS client to reject the server"
+        )
+        if status != expected_status:
+            kubectl.wait_chi_status(chi, expected_status)
 
-    fips_assert_operator_tls_rejection_in_logs(
-        workload=f"chi/{chi}",
-        min_version=min_version,
-    )
+    with Then("operator and metrics-exporter reject TLS 1.2-only ClickHouse"):
+        fips_assert_operator_tls_rejection_in_logs(
+            workload=f"chi/{chi}",
+            min_version=min_version,
+            containers=("clickhouse-operator", "metrics-exporter"),
+            trigger_metrics_exporter=True,
+            chi=chi,
+        )
 
 
 @TestStep(Then)
@@ -2034,24 +2252,28 @@ def fips_assert_chk_tls_rejected(
     min_version="1.3",
 ):
     """Assert CHK remains unfinished because operator TLS client rejects server TLS policy."""
-    kubectl.wait_object(
-        "pod",
-        "",
-        label=f"-l clickhouse-keeper.altinity.com/chk={chk}",
-        count=1,
-    )
+    with When(f"CHK {chk} pod is running"):
+        kubectl.wait_object(
+            "pod",
+            "",
+            label=f"-l clickhouse-keeper.altinity.com/chk={chk}",
+            count=1,
+        )
 
-    status = kubectl.get_field("chk", chk, ".status.status")
-    assert status != "Completed", error(
-        f"CHK {chk} reached Completed; expected operator TLS client to reject the server"
-    )
-    if status != expected_status:
-        kubectl.wait_chk_status(chk, expected_status)
+    with Then(f"CHK {chk} does not complete reconciliation"):
+        status = kubectl.get_field("chk", chk, ".status.status")
+        assert status != "Completed", error(
+            f"CHK {chk} reached Completed; expected operator TLS client to reject the server"
+        )
+        if status != expected_status:
+            kubectl.wait_chk_status(chk, expected_status)
 
-    fips_assert_operator_tls_rejection_in_logs(
-        workload=f"chk/{chk}",
-        min_version=min_version,
-    )
+    with Then("operator rejects TLS 1.2-only Keeper"):
+        fips_assert_operator_tls_rejection_in_logs(
+            workload=f"chk/{chk}",
+            min_version=min_version,
+            containers=("clickhouse-operator",),
+        )
 
 @TestStep(Then)
 def check_clickhouse_backup_clickhouse_tls_config(self, pod, ns=None):
