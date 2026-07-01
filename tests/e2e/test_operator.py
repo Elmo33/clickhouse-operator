@@ -8648,6 +8648,7 @@ def test_030009(self):
     RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KubernetesAPI("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse("1.0"),
 )
 def test_030017(self):
     """Host-run operator and metrics-exporter against a local openssl s_server fake K8s API.
@@ -8655,7 +8656,14 @@ def test_030017(self):
     Uses a fake kubeconfig and strict FIPS config (Enforced, fips.enforced=true).
     Approved cases pass when s_server logs ``CIPHER is <cipher>`` for the binary's
     connection. Rejected cases pass when the binary logs a TLS handshake failure.
+
+    Also runs host-run metrics-exporter against a real TLS-1.2-only ClickHouse Pod
+    deployed directly by Kubernetes (no operator, no CHI).
     """
+
+    ch_tls12_manifest = "manifests/pod/test-030017-clickhouse-tls12-only.yaml"
+
+    create_kubernetes_namespace_without_operator()
 
     with Given("operator and metrics-exporter binaries are extracted from shipped images"):
         fips_extract_shipped_binaries()
@@ -8698,6 +8706,17 @@ def test_030017(self):
             config_path=config_path,
         )
 
+    with Given("TLS 1.2-only ClickHouse pod is deployed by Kubernetes"):
+        deploy_standalone_tls12_clickhouse_pod(
+            pod_name=HOSTRUN_TLS12_CH_POD,
+            manifest_path=ch_tls12_manifest,
+        )
+
+    with Check("host-run metrics-exporter rejects TLS 1.2-only ClickHouse HTTPS"):
+        assert_hostrun_exporter_rejects_tls12_clickhouse(
+            binary_path=me_bin,
+            pod_name=HOSTRUN_TLS12_CH_POD,
+        )
 
 @TestScenario
 @Name("test_030011. FIPS Integrity check: detect binary tampering")
@@ -8846,6 +8865,39 @@ def test_030016(self):
                 or "Cipher    : 0000" in out
                 or "no peer certificate available" in out
         ), error(out)
+
+@TestScenario
+@Name("test_030018. ACVP responder smoke test: clickhouse-operator binary")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_WrapperIntegration("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_ConfigGeneration("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Operator_SHA2256AFT("1.0"),
+)
+def test_030018(self):
+    """Build operator with -tags acvp_wrapper and verify the embedded ACVP
+    responder answers getConfig + SHA2-256 AFT correctly.
+
+    Companion to test_acvp_metrics_exporter — both binaries embed the same
+    pkg/util/fips/acvp package under the build tag, so we run each independently
+    to confirm the argv0 dispatch fires in each binary's main path.
+    """
+    acvp_smoke("clickhouse-operator", "./cmd/operator")
+
+
+@TestScenario
+@Name("test_030019. ACVP responder smoke test: metrics-exporter binary")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_WrapperIntegration("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_ConfigGeneration("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_ACVP_Exporter_SHA2256AFT("1.0"),
+)
+def test_030019(self):
+    """Mirror of test_030019 for the metrics-exporter binary. Both
+    binaries ship the same FIPS module statically linked; this scenario
+    confirms metrics-exporter's argv0 dispatch is wired identically so a
+    regression in either binary's main path is caught.
+    """
+    acvp_smoke("metrics-exporter", "./cmd/metrics_exporter")
 
 def cleanup_chis(self):
     with Given("Cleanup CHIs"):

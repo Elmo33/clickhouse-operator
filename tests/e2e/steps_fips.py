@@ -23,17 +23,21 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 
 import yaml
 
 import e2e.util as util
 
-from e2e.steps import create_shell_namespace_clickhouse_template
+from e2e.steps import create_shell_namespace_clickhouse_template, delete_test_namespace, get_shell
 from testflows.asserts import error
 from testflows.core import *
 
 import e2e.kubectl as kubectl
+import struct
+import hashlib
 
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 FAKE_OPENSSL_SERVER = "fake-openssl-server"
 TLS_REJECT_MARKERS = (
@@ -550,10 +554,11 @@ def fips_assert_chi_admitted(self, chi, reason="FIPSImagePolicyViolation"):
 @TestStep(Given)
 def create_tls_secret_for_fips_hosts(
     self,
-    chi,
-    chk,
+    chi=None,
+    chk=None,
     secret_name="clickhouse-certs",
     replicas=2,
+    pod_hostnames=None,
 ):
     """Create a TLS secret whose SANs match this test namespace's pod DNS names."""
     ns = self.context.test_namespace
@@ -575,13 +580,22 @@ def create_tls_secret_for_fips_hosts(
     dns_suffixes = ("", f".{ns}", f".{ns}.svc", f".{ns}.svc.cluster.local")
     dns_names = ["localhost", "clickhouse", "clickhouse1", f"*.{ns}.svc.cluster.local"]
 
-    for replica in range(replicas):
-        for host in (
-            f"chi-{chi}-default-0-{replica}",
-            f"chk-{chk}-keeper-0-{replica}",
-        ):
+    if pod_hostnames:
+        for host in pod_hostnames:
             for suffix in dns_suffixes:
                 dns_names.append(f"{host}{suffix}")
+    else:
+        assert chi and chk, error(
+            "create_tls_secret_for_fips_hosts requires chi and chk "
+            "when pod_hostnames is not set"
+        )
+        for replica in range(replicas):
+            for host in (
+                f"chi-{chi}-default-0-{replica}",
+                f"chk-{chk}-keeper-0-{replica}",
+            ):
+                for suffix in dns_suffixes:
+                    dns_names.append(f"{host}{suffix}")
 
     san_entries = ["IP.1 = 127.0.0.1"]
     san_entries.extend(
@@ -2714,12 +2728,18 @@ def prepare_local_strict_operator_config(self):
     security = config.setdefault("security", {})
     security["policy"] = "Enforced"
     security.setdefault("fips", {})["enforced"] = True
-    security.setdefault("ipc", {})["tokenPath"] = os.path.join(work_dir, "ipc", "token")
+    ipc_dir = os.path.join(work_dir, "ipc")
+    os.makedirs(ipc_dir, exist_ok=True)
+    token_path = os.path.join(ipc_dir, "token")
+    with open(token_path, "w", encoding="utf-8") as f:
+        f.write(uuid.uuid4().hex)
+    security.setdefault("ipc", {})["tokenPath"] = token_path
     config_path = os.path.join(work_dir, "strict-operator-config.yaml")
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False)
 
     self.context.fips_local_strict_config_path = config_path
+    self.context.fips_local_ipc_token_path = token_path
     note(f"strict FIPS operator config -> {config_path}")
     return config_path
 
@@ -2966,3 +2986,541 @@ def assert_local_fake_k8s_rejected_tls_cases(
                 expectation="rejected",
                 case_name=case["name"],
             )
+
+
+def _hostrun_metrics_exporter_env(work_dir, ca_cert_path, fake_k8s_port=6443):
+    """Env for host-run metrics-exporter matching fips-test/run.sh run_ch_test()."""
+    kubeconfig_path = os.path.join(work_dir, "hostrun-kubeconfig")
+    _write_fake_kubeconfig(kubeconfig_path, fake_k8s_port, ca_cert_path)
+    env = os.environ.copy()
+    env["KUBECONFIG"] = kubeconfig_path
+    env["GODEBUG"] = "fips140=only"
+    env.pop("OPERATOR_POD_NAMESPACE", None)
+    env.pop("OPERATOR_POD_NAME", None)
+    return env, kubeconfig_path
+
+
+def _write_hostrun_clickhouse_tls_config(work_dir):
+    """Minimal chopconf for host-run exporter → TLS-1.2-only ClickHouse probe.
+
+    Sets minVersion=1.3 (like strict FIPS operator) while keeping Plain IPC and
+    Permissive policy so the fake kubeconfig path still works. verify=None skips
+    cert checks against 127.0.0.1 port-forward.
+    """
+    config_path = os.path.join(work_dir, "hostrun-clickhouse-tls-config.yaml")
+    config = {
+        "security": {
+            "policy": "Permissive",
+            "clickhouse": {
+                "tls": {
+                    "minVersion": "1.3",
+                    "verify": "None",
+                },
+            },
+            "ipc": {"mode": "Plain"},
+        },
+        "clickhouse": {
+            "access": {
+                "username": "clickhouse_operator",
+                "password": "clickhouse_operator_password",
+                "scheme": "https",
+                "port": 8443,
+            },
+        },
+    }
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False)
+    return config_path
+
+
+def _read_log_tail(log_path, max_lines=40):
+    if not log_path or not os.path.isfile(log_path):
+        return "(no log file)"
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    return "".join(lines[-max_lines:])
+
+
+def _hostrun_exporter_ch_tls_rejection_in_logs(logs):
+    """Match fips-test/run.sh run_ch_test() client-side TLS failure grep."""
+    if any(
+        "connect():FAILED" in line and "protocol version not supported" in line
+        for line in logs.splitlines()
+    ):
+        return True
+    return any(
+        re.search(
+            r"tls:.*cipher|tls:.*handshake|tls:.*version|"
+            r"remote error: tls|no cipher suite|no supported versions|tls: .*alert",
+            line,
+            re.IGNORECASE,
+        )
+        for line in logs.splitlines()
+    )
+
+
+def _build_hostrun_metrics_exporter_chi_payload(chi, hostname, https_port):
+    return {
+        "type": "cr",
+        "cr": {
+            "namespace": "default",
+            "name": chi,
+            "labels": {},
+            "annotations": {},
+            "clusters": [{
+                "name": "default",
+                "hosts": [{
+                    "name": "0-0",
+                    "hostname": hostname,
+                    "httpsPort": https_port,
+                }],
+            }],
+        },
+    }
+
+
+def _wait_local_http_ready(url, timeout=10, process=None, log_path=None):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if process is not None and process.poll() is not None:
+            assert False, error(
+                f"metrics-exporter exited with code {process.returncode} "
+                f"before {url} became ready\n"
+                f"log tail:\n{_read_log_tail(log_path)}"
+            )
+        result = subprocess.run(
+            ["curl", "-sf", "-o", "/dev/null", url],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+        time.sleep(0.5)
+    assert False, error(
+        f"HTTP endpoint not ready: {url}\n"
+        f"log tail:\n{_read_log_tail(log_path)}"
+    )
+
+
+@contextmanager
+def _local_pod_port_forward(ns, pod, remote_port, local_port=None):
+    local_port = local_port or _free_local_port()
+    cmd = shlex.split(current().context.kubectl_cmd) + [
+        "-n",
+        ns,
+        "port-forward",
+        f"pod/{pod}",
+        f"{local_port}:{remote_port}",
+    ]
+    pf = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if pf.poll() is not None:
+                out, err = pf.communicate()
+                assert False, error(
+                    "kubectl port-forward exited early\n"
+                    f"stdout:\n{out}\n"
+                    f"stderr:\n{err}"
+                )
+            try:
+                socket.create_connection(
+                    ("127.0.0.1", int(local_port)), timeout=0.5
+                ).close()
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            assert False, error(
+                f"port-forward to {pod}:{remote_port} "
+                f"not ready on 127.0.0.1:{local_port}"
+            )
+        yield str(local_port)
+    finally:
+        pf.terminate()
+        try:
+            pf.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pf.kill()
+
+
+def _post_hostrun_metrics_exporter_chi(body, metrics_port=8888, token_path=None):
+    cmd = [
+        "curl",
+        "-sS",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "-X",
+        "POST",
+        f"http://127.0.0.1:{metrics_port}/chi",
+        "-H",
+        "Content-Type: application/json",
+    ]
+    if token_path:
+        with open(token_path, encoding="utf-8") as f:
+            token = f.read().strip()
+        cmd.extend(["-H", f"X-CHOP-Token: {token}"])
+    cmd.extend(["-d", body])
+    result = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, error(
+        f"POST /chi failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    return result.stdout.strip()
+
+
+def _scrape_hostrun_metrics_exporter(metrics_port=8888):
+    result = subprocess.run(
+        [
+            "curl",
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            f"http://127.0.0.1:{metrics_port}/metrics",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, error(
+        f"GET /metrics failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    return result.stdout.strip()
+
+
+HOSTRUN_TLS12_CH_POD = "test-030017-clickhouse-tls12"
+HOSTRUN_TLS12_CH_CR = "hostrun-tls12-clickhouse"
+
+
+@TestStep(Given)
+def create_kubernetes_namespace_without_operator(self):
+    """Create an isolated test namespace without installing the operator."""
+    with Given("I create shell"):
+        shell = get_shell()
+        self.context.shell = shell
+
+    match = re.search(r"test_\d+(?:_\d+)?", current().name)
+    assert match, error(
+        f"cannot derive namespace prefix from test name: {current().name!r}"
+    )
+    random_namespace = f"{match.group(0).replace('_', '-')}-{uuid.uuid1()}"
+    self.context.test_namespace = random_namespace
+    self.context.operator_namespace = random_namespace
+    util.create_namespace(self.context.test_namespace)
+    current().context.cleanup(delete_test_namespace)
+
+
+@TestStep(Given)
+def deploy_standalone_tls12_clickhouse_pod(
+    self,
+    pod_name,
+    manifest_path,
+    secret_name="clickhouse-certs",
+    create_secret=True,
+):
+    """kubectl apply a TLS-1.2-only ClickHouse Pod (no operator, no CHI)."""
+    if create_secret:
+        create_tls_secret_for_fips_hosts(
+            secret_name=secret_name,
+            pod_hostnames=[pod_name],
+        )
+    kubectl.apply(util.get_full_path(manifest_path))
+    kubectl.wait_pod_status(pod_name, "Running")
+    kubectl.wait_container_status(pod_name, "true")
+
+
+@TestStep(Check)
+def assert_hostrun_exporter_rejects_tls12_clickhouse(
+    self,
+    binary_path,
+    pod_name,
+    cr_name=HOSTRUN_TLS12_CH_CR,
+    metrics_port=8888,
+    local_https_port=8443,
+    remote_https_port=8443,
+):
+    """Run metrics-exporter on the host against a real TLS-1.2-only ClickHouse pod.
+
+    Uses a minimal chopconf with clickhouse.tls.minVersion=1.3 (same rejection
+    semantics as test_030009), Plain IPC, --kubeconfig + GODEBUG, POST /chi
+    without IPC token, then GET /metrics to trigger the CH TLS dial.
+    """
+    ns = self.context.test_namespace
+    work_dir = self.context.fips_local_openssl_tls_dir
+    log_path = os.path.join(work_dir, "hostrun-metrics-exporter.log")
+    env, kubeconfig_path = _hostrun_metrics_exporter_env(
+        work_dir,
+        self.context.fips_local_openssl_cert,
+    )
+    config_path = _write_hostrun_clickhouse_tls_config(work_dir)
+
+    with Given(f"host-run metrics-exporter listens on 127.0.0.1:{metrics_port}"):
+        log_file = open(log_path, "w", encoding="utf-8")
+        process = subprocess.Popen(
+            [
+                binary_path,
+                "-logtostderr=true",
+                "-v=1",
+                f"--kubeconfig={kubeconfig_path}",
+                f"--config={config_path}",
+            ],
+            env=env,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            _wait_local_http_ready(
+                f"http://127.0.0.1:{metrics_port}/metrics",
+                process=process,
+                log_path=log_path,
+            )
+
+            with When(
+                f"ClickHouse HTTPS on {pod_name} is forwarded to 127.0.0.1:"
+                f"{local_https_port} and collect is triggered"
+            ):
+                with _local_pod_port_forward(
+                    ns=ns,
+                    pod=pod_name,
+                    remote_port=remote_https_port,
+                    local_port=local_https_port,
+                ):
+                    payload = _build_hostrun_metrics_exporter_chi_payload(
+                        chi=cr_name,
+                        hostname="127.0.0.1",
+                        https_port=local_https_port,
+                    )
+                    body = json.dumps(payload, separators=(",", ":"))
+                    code = _post_hostrun_metrics_exporter_chi(
+                        body=body,
+                        metrics_port=metrics_port,
+                    )
+                    assert code == "200", error(
+                        f"host-run POST /chi failed: HTTP {code!r}\nbody: {body}"
+                    )
+                    metrics_code = _scrape_hostrun_metrics_exporter(
+                        metrics_port=metrics_port,
+                    )
+                    assert metrics_code == "200", error(
+                        f"host-run GET /metrics failed: HTTP {metrics_code!r}"
+                    )
+                    time.sleep(1)
+        finally:
+            log_file.close()
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        output = f.read()
+
+    with Then("host-run metrics-exporter rejects TLS 1.2-only ClickHouse HTTPS"):
+        assert _hostrun_exporter_ch_tls_rejection_in_logs(output), error(
+            "host-run metrics-exporter did not log TLS rejection against ClickHouse\n"
+            f"log excerpt:\n{_fips_tls_rejection_log_excerpt(output) or '(none)'}\n"
+            f"log tail:\n{_read_log_tail(log_path)}"
+        )
+
+def _frame_request(command_name, *args):
+    """Encode an ACVP request in the BoringSSL modulewrapper wire format.
+
+    The format (little-endian throughout) is:
+      uint32 num_args             // command name counts as args[0]
+      uint32 len(args[0])
+      ...
+      uint32 len(args[N-1])
+      bytes  args[0]
+      ...
+      bytes  args[N-1]
+
+    Matches the reader at pkg/util/fips/acvp/wrapper.go::readRequest. The
+    test/decode side is symmetric with wrapper_test.go::decodeResponse.
+    """
+    payload = [command_name.encode("utf-8")] + list(args)
+    out = struct.pack("<I", len(payload))
+    for chunk in payload:
+        out += struct.pack("<I", len(chunk))
+    for chunk in payload:
+        out += chunk
+    return out
+
+
+def _parse_response(blob):
+    """Decode the symmetric response framing. Returns a list of byte slices."""
+    if len(blob) < 4:
+        raise ValueError(f"response too short: {len(blob)} bytes")
+    (count,) = struct.unpack("<I", blob[0:4])
+    offset = 4
+    lengths = []
+    for _ in range(count):
+        if offset + 4 > len(blob):
+            raise ValueError("truncated length header")
+        (n,) = struct.unpack("<I", blob[offset : offset + 4])
+        lengths.append(n)
+        offset += 4
+    args = []
+    for n in lengths:
+        if offset + n > len(blob):
+            raise ValueError(f"truncated payload (want {n} bytes, have {len(blob)-offset})")
+        args.append(blob[offset : offset + n])
+        offset += n
+    return args
+
+
+def _build_acvp_binary(cmd_path, binary_name):
+    """Compile <cmd_path> with -tags acvp_wrapper and symlink as <binary_name>-acvp.
+
+    Returns the absolute path to the symlink, or None if the build fails (the
+    caller skips the scenario in that case so missing toolchain doesn't fail
+    the whole suite).
+    """
+    tmpdir = tempfile.mkdtemp(prefix="acvp-e2e-")
+    binary_path = os.path.join(tmpdir, binary_name)
+    symlink_path = os.path.join(tmpdir, f"{binary_name}-acvp")
+
+    env = os.environ.copy()
+    # GOFIPS140 must be set; the wrapper's Run() refuses to start if
+    # crypto/fips140.Enabled() reports false. v1.0.0 matches the build pinned
+    # in dev/go_build_config.sh.
+    env.setdefault("GOFIPS140", "v1.0.0")
+    env.setdefault("GODEBUG", "fips140=only")
+    env.setdefault("CGO_ENABLED", "0")
+
+    result = subprocess.run(
+        [
+            "go",
+            "build",
+            "-tags",
+            "acvp_wrapper",
+            "-o",
+            binary_path,
+            cmd_path,
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    if result.returncode != 0:
+        return None, f"go build failed: {result.stderr.strip()}"
+
+    # Symlink-based argv0 dispatch — the responder fires only when
+    # filepath.Base(os.Args[0]) ends with "-acvp" (see
+    # cmd/<binary>/app/acvp_dispatch_on.go).
+    try:
+        os.symlink(binary_path, symlink_path)
+    except OSError as exc:
+        return None, f"symlink failed: {exc}"
+
+    return symlink_path, None
+
+
+def _invoke_responder(binary_path, request_blob, timeout=15):
+    """Run the responder once, sending request_blob on stdin and returning stdout."""
+    env = os.environ.copy()
+    env["GODEBUG"] = "fips140=only"
+    proc = subprocess.run(
+        [binary_path],
+        input=request_blob,
+        env=env,
+        capture_output=True,
+        timeout=timeout,
+    )
+    return proc
+
+
+def acvp_smoke(binary_name, cmd_path):
+    """Shared body for both binaries. Exercises:
+
+      1. getConfig — round-trip the capability JSON and check it advertises
+         FIPS-approved primitives + excludes the deliberately-omitted ML-KEM
+         and ML-DSA (which require Go-internal APIs not in this build).
+      2. SHA2-256 AFT — hash a known input, compare to hashlib.sha256.
+    """
+    if shutil.which("go") is None:
+        skip("go toolchain unavailable; ACVP build requires Go 1.26+")
+        return
+
+    with Given(f"Build {binary_name} with -tags acvp_wrapper"):
+        binary_path, build_err = _build_acvp_binary(cmd_path, binary_name)
+        if binary_path is None:
+            # Build failure is the scenario's failure mode — surface it so the
+            # local pkg/util/fips/acvp/run.sh reproducer catches the same regression.
+            assert False, error(f"ACVP-tagged build of {binary_name} failed: {build_err}")
+
+    with When("Round-trip a getConfig request"):
+        proc = _invoke_responder(binary_path, _frame_request("getConfig"))
+        assert proc.returncode == 0, error(
+            f"responder exited {proc.returncode}; stderr={proc.stderr.decode('utf-8', 'replace')}"
+        )
+        responses = _parse_response(proc.stdout)
+        assert len(responses) == 1, error(f"want 1 response arg, got {len(responses)}")
+        config_text = responses[0].decode("utf-8")
+
+    with Then("Capability JSON advertises FIPS-approved primitives"):
+        # The wrapper is documented to expose SHA2 / AES-GCM and to exclude
+        # ML-KEM / ML-DSA (those need Go-internal crypto APIs). Pin the
+        # invariant in both directions — a future commit dropping AES-GCM or
+        # silently re-enabling ML-KEM trips this assertion.
+        assert "SHA2-256" in config_text, error("getConfig must advertise SHA2-256")
+        assert "ACVP-AES-GCM" in config_text, error("getConfig must advertise ACVP-AES-GCM")
+        assert "ML-KEM" not in config_text, error(
+            "getConfig must NOT advertise ML-KEM (uses Go-internal API)"
+        )
+        assert "ML-DSA" not in config_text, error(
+            "getConfig must NOT advertise ML-DSA (uses Go-internal API)"
+        )
+        # Sanity-check the bytes parse as JSON; a malformed config would make
+        # acvptool reject the entire run.
+        try:
+            json.loads(config_text)
+        except json.JSONDecodeError as exc:
+            assert False, error(f"getConfig payload is not valid JSON: {exc}")
+
+    with When("Round-trip a SHA2-256 AFT request"):
+        # Algorithm Functional Test: send a message, expect SHA2-256 digest.
+        # `abc` is the canonical short-input test vector and matches the
+        # wrapper_test.go::TestSHA256AFT case so the e2e and unit assertions
+        # are pinned to the same fixture.
+        message = b"abc"
+        proc = _invoke_responder(binary_path, _frame_request("SHA2-256", message))
+        assert proc.returncode == 0, error(
+            f"SHA2-256 responder exited {proc.returncode}; "
+            f"stderr={proc.stderr.decode('utf-8', 'replace')}"
+        )
+        responses = _parse_response(proc.stdout)
+        assert len(responses) == 1, error(f"want 1 response arg, got {len(responses)}")
+
+    with Then("Hash output matches hashlib.sha256"):
+        want = hashlib.sha256(message).digest()
+        got = responses[0]
+        assert got == want, error(
+            f"SHA2-256 hash mismatch: want {want.hex()}, got {got.hex()}"
+        )
+
+    # Cleanup is best-effort — leftover /tmp/acvp-e2e-* dirs get reaped by the
+    # OS or the next runner invocation; failing to clean up here must not mask
+    # the assertion outcomes above.
+    try:
+        shutil.rmtree(os.path.dirname(binary_path), ignore_errors=True)
+    except Exception:
+        pass
+
