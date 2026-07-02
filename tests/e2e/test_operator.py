@@ -1990,6 +1990,361 @@ def test_010014_1(self):
         delete_test_namespace()
 
 
+def async_loader_scale_up_bug_reproduced(chi, new_host, new_pod=None):
+    """Return (bug_reproduced, schema_ready, details) for the new replica.
+
+    The sticky async-loader bug means cluster-dependent objects exist but failed
+    to load with CLUSTER_DOESNT_EXIST / ASYNC_LOAD_WAIT_FAILED. UNKNOWN_TABLE is
+    treated as schema-not-ready (operator migration still in flight), not the bug.
+    """
+    dist_table_exists = clickhouse.query_with_error(
+        chi,
+        "SELECT count() "
+        "FROM system.tables "
+        "WHERE database = 'default' AND name = 'dist_014_2'",
+        host=new_host,
+    )
+    rmt_table_exists = clickhouse.query_with_error(
+        chi,
+        "SELECT count() "
+        "FROM system.tables "
+        "WHERE database = 'default' AND name = 'rmt_014_2'",
+        host=new_host,
+    )
+    dist_out = clickhouse.query_with_error(
+        chi,
+        "SELECT count() FROM default.dist_014_2",
+        host=new_host,
+    )
+    dict_status = clickhouse.query_with_error(
+        chi,
+        "SELECT status, last_exception "
+        "FROM system.dictionaries "
+        "WHERE name = 'max_ts_dict_014_2'",
+        host=new_host,
+    )
+    dict_loaded = clickhouse.query_with_error(
+        chi,
+        "SELECT count() FROM system.dictionaries "
+        "WHERE name = 'max_ts_dict_014_2' AND status = 'LOADED'",
+        host=new_host,
+    )
+    async_loader = clickhouse.query_with_error(
+        chi,
+        "SELECT status, count() "
+        "FROM system.asynchronous_loader "
+        "WHERE status IN ('FAILED', 'CANCELED') "
+        "GROUP BY status",
+        host=new_host,
+    )
+    view_refresh_failed = clickhouse.query_with_error(
+        chi,
+        "SELECT count() "
+        "FROM system.view_refreshes "
+        "WHERE view = 'agg_mv_014_2' AND exception != ''",
+        host=new_host,
+    )
+    cluster_errors = clickhouse.query_with_error(
+        chi,
+        "SELECT name, value "
+        "FROM system.errors "
+        "WHERE name IN ('CLUSTER_DOESNT_EXIST', 'ASYNC_LOAD_WAIT_FAILED')",
+        host=new_host,
+    )
+
+    startup_log_hits = ""
+    if new_pod:
+        startup_log_hits = kubectl.launch(
+            f"logs {new_pod} -c clickhouse-pod --tail=500",
+            ok_to_fail=True,
+        )
+
+    schema_ready = (
+        dist_table_exists == "1"
+        and rmt_table_exists == "1"
+        and "UNKNOWN_TABLE" not in dist_out
+    )
+
+    dist_count_ok = False
+    try:
+        dist_count_ok = int(dist_out.strip()) == 2000
+    except ValueError:
+        dist_count_ok = False
+
+    sticky_query_failure = (
+        "CLUSTER_DOESNT_EXIST" in dist_out
+        or "ASYNC_LOAD_WAIT_FAILED" in dist_out
+    )
+    sticky_loader_failure = (
+        "FAILED" in async_loader
+        or "CANCELED" in async_loader
+    )
+    sticky_dict_failure = (
+        dict_status
+        and "max_ts_dict_014_2" in dict_status
+        and "LOADED" not in dict_status
+        and (
+            "CLUSTER_DOESNT_EXIST" in dict_status
+            or "ASYNC_LOAD_WAIT_FAILED" in dict_status
+            or "CANCELED" in dict_status
+            or "FAILED" in dict_status
+        )
+    )
+    startup_log_failure = (
+        "CLUSTER_DOESNT_EXIST" in startup_log_hits
+        and (
+            "default.dist_014_2" in startup_log_hits
+            or "default.max_ts_dict_014_2" in startup_log_hits
+            or "AsyncLoader" in startup_log_hits
+        )
+    )
+
+    bug_reproduced = schema_ready and (
+        sticky_query_failure
+        or not dist_count_ok
+        or sticky_dict_failure
+        or sticky_loader_failure
+        or (view_refresh_failed not in ("", "0"))
+        or "CLUSTER_DOESNT_EXIST" in cluster_errors
+        or "ASYNC_LOAD_WAIT_FAILED" in cluster_errors
+        or startup_log_failure
+    )
+
+    return bug_reproduced, schema_ready, {
+        "dist_table_exists": dist_table_exists,
+        "rmt_table_exists": rmt_table_exists,
+        "dist_out": dist_out,
+        "dist_count_ok": dist_count_ok,
+        "dict_status": dict_status,
+        "dict_loaded": dict_loaded,
+        "async_loader": async_loader,
+        "view_refresh_failed": view_refresh_failed,
+        "cluster_errors": cluster_errors,
+        "startup_log_failure": startup_log_failure,
+    }
+
+
+def print_async_loader_scale_up_debug(chi, cluster, host, pod):
+    checks = {
+        "system.clusters": (
+            f"SELECT cluster, shard_num, replica_num, host_name "
+            f"FROM system.clusters WHERE cluster = '{cluster}' "
+            f"ORDER BY shard_num, replica_num"
+        ),
+        "system.tables": (
+            "SELECT name, engine "
+            "FROM system.tables "
+            "WHERE database = 'default' "
+            "AND name IN ('rmt_014_2', 'dist_014_2', 'agg_014_2', 'agg_mv_014_2') "
+            "ORDER BY name"
+        ),
+        "distributed table": "SELECT count() FROM default.dist_014_2",
+        "dictionary": (
+            "SELECT name, status, last_exception "
+            "FROM system.dictionaries "
+            "WHERE name = 'max_ts_dict_014_2'"
+        ),
+        "refreshable MV": (
+            "SELECT view, status, exception "
+            "FROM system.view_refreshes "
+            "WHERE view = 'agg_mv_014_2'"
+        ),
+        "async loader": (
+            "SELECT status, count() "
+            "FROM system.asynchronous_loader "
+            "GROUP BY status "
+            "ORDER BY status"
+        ),
+        "cluster errors": (
+            "SELECT name, value "
+            "FROM system.errors "
+            "WHERE name IN ('CLUSTER_DOESNT_EXIST', 'ASYNC_LOAD_WAIT_FAILED')"
+        ),
+    }
+
+    for name, query in checks.items():
+        with By(f"printing {name} from {host}"):
+            out = clickhouse.query_with_error(chi, query, host=host)
+            note(f"\n{name}:\n{out}")
+
+    with By("printing CHI and new replica pod state"):
+        note(yaml.safe_dump(kubectl.get("chi", chi)["status"]))
+        kubectl.launch(f"describe pod {pod}", ok_to_fail=True)
+        kubectl.launch(f"logs {pod} -c clickhouse-pod --tail=500", ok_to_fail=True)
+
+
+@TestScenario
+@Name("test_010014_2. Replica scale-up should not leave async loader failures")
+@Requirements(
+    RQ_SRS_026_ClickHouseOperator_CustomResource_Spec_Configuration_Clusters_Cluster_ZooKeeper("1.0"),
+    RQ_SRS_026_ClickHouseOperator_CustomResource_Spec_Configuration_Clusters("1.0"),
+)
+def test_010014_2(self):
+    """Reproduce sticky async-loader failures after replica scale-up.
+
+    Current broken behavior:
+      - CHI becomes Completed.
+      - new replica becomes Ready.
+      - system.clusters sees the final cluster definition.
+      - Distributed/dictionary/refreshable MV load remains broken until pod restart.
+
+    schemaPolicy replica/shard None was tried but causes UNKNOWN_TABLE instead of the
+    sticky async-loader failure: with migration disabled the new replica never gets
+    the Distributed/dictionary/MV objects at all.
+
+    The final health assertion is XFAIL until the operator fixes the new-host
+    restart / remote_servers ordering issue.
+    """
+    create_shell_namespace_clickhouse_template()
+
+    util.require_keeper(keeper_type=self.context.keeper_type)
+
+    cluster = "default"
+    manifest_1 = "manifests/chi/test-014-2-async-loader-scale-up-1.yaml"
+    manifest_2 = "manifests/chi/test-014-2-async-loader-scale-up-2.yaml"
+    chi = yaml_manifest.get_name(util.get_full_path(manifest_1))
+
+    first_host = f"chi-{chi}-{cluster}-0-0"
+    new_host = f"chi-{chi}-{cluster}-0-1"
+    new_pod = f"{new_host}-0"
+
+    with Given("a single-replica CHI exists"):
+        kubectl.create_and_check(
+            manifest=manifest_1,
+            check={
+                "apply_templates": {
+                    current().context.clickhouse_template,
+                    "manifests/chit/tpl-persistent-volume-100Mi.yaml",
+                },
+                "pod_count": 1,
+                "pdb": {"default": 1},
+                "do_not_delete": 1,
+            },
+            timeout=600,
+        )
+
+        wait_for_cluster(chi, cluster, 1, 1, force_wait=True)
+
+    create_queries = [
+        f"""
+        CREATE TABLE default.rmt_014_2 ON CLUSTER '{cluster}'
+        (
+            ts DateTime,
+            metric String,
+            val Float64
+        )
+        ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{{shard}}/default/rmt_014_2', '{{replica}}')
+        ORDER BY (metric, ts)
+        """,
+        """
+        INSERT INTO default.rmt_014_2
+        SELECT
+            now() - number,
+            concat('m', toString(number % 5)),
+            number
+        FROM numbers(2000)
+        """,
+        f"""
+        CREATE TABLE default.dist_014_2 ON CLUSTER '{cluster}' AS default.rmt_014_2
+        ENGINE = Distributed('{cluster}', default, rmt_014_2, rand())
+        """,
+        f"""
+        CREATE DICTIONARY default.max_ts_dict_014_2 ON CLUSTER '{cluster}'
+        (
+            metric String,
+            max_ts DateTime
+        )
+        PRIMARY KEY metric
+        SOURCE(CLICKHOUSE(
+            QUERY 'SELECT metric, max(ts) AS max_ts FROM default.dist_014_2 GROUP BY metric'
+        ))
+        LAYOUT(COMPLEX_KEY_HASHED())
+        LIFETIME(MIN 30 MAX 60)
+        """,
+        f"""
+        CREATE TABLE default.agg_014_2 ON CLUSTER '{cluster}'
+        (
+            metric String,
+            max_ts DateTime,
+            cnt UInt64
+        )
+        ENGINE = MergeTree
+        ORDER BY metric
+        """,
+        f"""
+        CREATE MATERIALIZED VIEW default.agg_mv_014_2 ON CLUSTER '{cluster}'
+        REFRESH EVERY 10 SECOND TO default.agg_014_2 AS
+        SELECT
+            metric,
+            dictGet('default.max_ts_dict_014_2', 'max_ts', tuple(metric)) AS max_ts,
+            count() AS cnt
+        FROM default.dist_014_2
+        GROUP BY metric
+        """,
+    ]
+
+    with When("cluster-dependent objects exist on the first replica"):
+        for query in create_queries:
+            clickhouse.query(chi, query, host=first_host, timeout=120)
+
+    with And("the first replica can read through the dependency chain"):
+        out = clickhouse.query_with_error(
+            chi,
+            "SELECT count() FROM default.dist_014_2",
+            host=first_host,
+        )
+        assert out == "2000", error(out)
+
+    with When("the CHI is scaled from 1 replica to 2 replicas"):
+        kubectl.apply_chi(util.get_full_path(manifest_2, False))
+        kubectl.wait_pod_status(new_pod, "Running")
+        kubectl.wait_chi_status(chi, "Completed", retries=120)
+        kubectl.wait_object(
+            "pod",
+            "",
+            label=f"-l clickhouse.altinity.com/chi={chi}",
+            count=2,
+            retries=120,
+        )
+        kubectl.check_pdb(chi, "chi", {"default": 1})
+
+    with Then("the new replica should see the final cluster topology"):
+        wait_for_cluster(chi, cluster, 1, 2, force_wait=True)
+
+    with Then("the new replica should not have sticky async-loader failures", flags=XFAIL):
+        schema_ready = False
+        details = {}
+        for attempt in retries(timeout=120, delay=5):
+            with attempt:
+                bug_reproduced, schema_ready, details = async_loader_scale_up_bug_reproduced(
+                    chi, new_host, new_pod
+                )
+
+                if not schema_ready:
+                    note(
+                        "schema not ready on new replica yet "
+                        f"(dist={details.get('dist_table_exists')!r}, "
+                        f"rmt={details.get('rmt_table_exists')!r})"
+                    )
+                    raise AssertionError("schema not ready yet")
+
+                if bug_reproduced:
+                    print_async_loader_scale_up_debug(chi, cluster, new_host, new_pod)
+
+                assert not bug_reproduced, error(
+                    "known async-loader scale-up bug reproduced: "
+                    f"{details!r}"
+                )
+
+        assert schema_ready, error(
+            "timed out waiting for schema propagation to the new replica; "
+            f"last details={details!r}"
+        )
+
+    with Finally("I clean up"):
+        delete_test_namespace()
+
+
 def check_host_network(manifest, replica1_port="9000", replica2_port="9000"):
     chi = yaml_manifest.get_name(util.get_full_path(manifest))
     cluster = "default"
@@ -8642,28 +8997,30 @@ def test_030009(self):
 
 @TestScenario
 @Tags("HEAVY")
-@Name("test_030017. FIPS host-run K8s client TLS cipher probes against local OpenSSL fake API")
+@Name("test_030017. FIPS host-run TLS cipher probes against local openssl s_server")
 @Requirements(
     RQ_SRS_026_ClickHouseOperator_FIPS_TLS_ApprovedCiphers("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_TLS_RejectedCiphers("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_KubernetesAPI("1.0"),
+    RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Operator_ClickHouse("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_KubernetesAPI("1.0"),
     RQ_SRS_026_ClickHouseOperator_FIPS_Connect_Exporter_ClickHouse("1.0"),
 )
 def test_030017(self):
-    """Host-run operator and metrics-exporter against a local openssl s_server fake K8s API.
+    """Host-run FIPS TLS probes — no real Kubernetes.
 
-    Uses a fake kubeconfig and strict FIPS config (Enforced, fips.enforced=true).
-    Approved cases pass when s_server logs ``CIPHER is <cipher>`` for the binary's
-    connection. Rejected cases pass when the binary logs a TLS handshake failure.
+    Operator → ClickHouse: fake_k8s + openssl s_server (:8443) +
+    clickhouse-operator. fake_k8s drives reconcile until Ping hits s_server.
 
-    Also runs host-run metrics-exporter against a real TLS-1.2-only ClickHouse Pod
-    deployed directly by Kubernetes (no operator, no CHI).
+    Operator → Kubernetes API (cipher matrix): fake kubeconfig → openssl
+    s_server as the API TLS peer.
+
+    Metrics-exporter → ClickHouse: host-run exporter, POST /chi with
+    127.0.0.1:<port>, GET /metrics — no k8s, no fake_k8s.
+
+    Metrics-exporter → Kubernetes API (cipher matrix): fake kubeconfig →
+    openssl s_server as the API TLS peer.
     """
-
-    ch_tls12_manifest = "manifests/pod/test-030017-clickhouse-tls12-only.yaml"
-
-    create_kubernetes_namespace_without_operator()
 
     with Given("operator and metrics-exporter binaries are extracted from shipped images"):
         fips_extract_shipped_binaries()
@@ -8706,16 +9063,32 @@ def test_030017(self):
             config_path=config_path,
         )
 
-    with Given("TLS 1.2-only ClickHouse pod is deployed by Kubernetes"):
-        deploy_standalone_tls12_clickhouse_pod(
-            pod_name=HOSTRUN_TLS12_CH_POD,
-            manifest_path=ch_tls12_manifest,
+    with Check("clickhouse-operator approved TLS 1.3 ciphers against openssl s_server"):
+        assert_local_fake_clickhouse_approved_tls_cases(
+            binary_label="clickhouse-operator",
+            binary_path=op_bin,
+            probe_target="operator",
         )
 
-    with Check("host-run metrics-exporter rejects TLS 1.2-only ClickHouse HTTPS"):
-        assert_hostrun_exporter_rejects_tls12_clickhouse(
+    with Check("clickhouse-operator rejected TLS probes against openssl s_server"):
+        assert_local_fake_clickhouse_rejected_tls_cases(
+            binary_label="clickhouse-operator",
+            binary_path=op_bin,
+            probe_target="operator",
+        )
+
+    with Check("metrics-exporter approved TLS 1.3 ciphers against openssl s_server"):
+        assert_local_fake_clickhouse_approved_tls_cases(
+            binary_label="metrics-exporter",
             binary_path=me_bin,
-            pod_name=HOSTRUN_TLS12_CH_POD,
+            probe_target="metrics-exporter",
+        )
+
+    with Check("metrics-exporter rejected TLS probes against openssl s_server"):
+        assert_local_fake_clickhouse_rejected_tls_cases(
+            binary_label="metrics-exporter",
+            binary_path=me_bin,
+            probe_target="metrics-exporter",
         )
 
 @TestScenario
